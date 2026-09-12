@@ -9,6 +9,14 @@ import React, { useEffect, useState } from "react";
 
 const API = ""; // same-origin via Nginx gateway
 
+// Sentry can't be embedded (X-Frame-Options: DENY), so it's surfaced as a
+// link-out tab that opens the project's Issues view in a new tab.
+// Edit these to point at your own Sentry instance / project.
+const SENTRY_HOST = "test-q0r.sentry.io";           // e.g. "your-org.sentry.io" or "sentry.io"
+const SENTRY_ORG_SLUG = "test-q0r";                  // organization slug
+const SENTRY_PROJECT_ID = "4512071434829824";        // project id (numeric, from the DSN)
+const SENTRY_URL = `https://${SENTRY_HOST}/organizations/${SENTRY_ORG_SLUG}/issues/?project=${SENTRY_PROJECT_ID}`;
+
 const TABS = {
   ops:                 { kind: "inline", title: "Ops Console", short: "Ops" },
   "diagram-architecture": { kind: "frame",  title: "Architecture", short: "Arch", src: "/diagrams/architecture.html", group: "Diagrams" },
@@ -19,16 +27,19 @@ const TABS = {
   temporal:            { kind: "frame",  title: "Temporal UI",    short: "Temporal", src: "/temporal/", group: "Apps" },
   mlflow:              { kind: "frame",  title: "MLflow UI",      short: "MLflow",   src: "/mlflow/",    group: "Apps" },
   docs:                { kind: "frame",  title: "API Docs",       short: "Docs", src: "/docs",        group: "Apps" },
+  sentry:              { kind: "link",  title: "Sentry",         short: "Sentry", url: SENTRY_URL, group: "Apps" },
 };
 
 const SECTIONS = [
   { label: "Lifecycle", ids: ["ops"] },
   { label: "Diagrams", ids: ["diagram-architecture", "diagram-workflow", "diagram-lifecycle", "diagram-sequence", "diagram-dataflow"] },
-  { label: "Apps & docs", ids: ["temporal", "mlflow", "docs"] },
+  { label: "Apps & docs", ids: ["temporal", "mlflow", "docs", "sentry"] },
 ];
 
 const api = (path, opts = {}) =>
   fetch(`${API}${path}`, { credentials: "include", ...opts });
+
+const shortLabel = (t) => t.short || t.title;
 
 function useApi() {
   const [data, setData] = useState(null);
@@ -151,6 +162,18 @@ function Shell({ me, onLogout }) {
 
   const renderPane = () => {
     if (active.kind === "inline") return <InlineConsole data={data} error={error} call={call} />;
+    if (active.kind === "link")
+      return (
+        <div className="linkout">
+          <p>
+            {active.title} opens in a new tab — a fresh browser session, so any
+            login happens there independently of the ops console.
+          </p>
+          <a className="linkout-cta" href={active.url} target="_blank" rel="noreferrer">
+            Open {shortLabel(active)} →
+          </a>
+        </div>
+      );
     return (
       <iframe
         key={tab}
@@ -173,16 +196,32 @@ function Shell({ me, onLogout }) {
         {SECTIONS.map((sec) => (
           <div className="section" key={sec.label}>
             <div className="section-label">{sec.label}</div>
-            {sec.ids.map((id) => (
-              <button
-                key={id}
-                className={`nav ${tab === id ? "active" : ""}`}
-                onClick={() => setTab(id)}
-                title={TABS[id].title}
-              >
-                {TABS[id].title}
-              </button>
-            ))}
+            {sec.ids.map((id) => {
+              const t = TABS[id];
+              if (t.kind === "link")
+                return (
+                  <a
+                    key={id}
+                    className="nav"
+                    href={t.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={t.title}
+                  >
+                    {t.title}
+                  </a>
+                );
+              return (
+                <button
+                  key={id}
+                  className={`nav ${tab === id ? "active" : ""}`}
+                  onClick={() => setTab(id)}
+                  title={t.title}
+                >
+                  {t.title}
+                </button>
+              );
+            })}
           </div>
         ))}
         <div className="spacer" />
