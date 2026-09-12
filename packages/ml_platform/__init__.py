@@ -1,4 +1,4 @@
-"""Shared domain package for Build1 — the DDD core.
+"""Shared domain package for mlops-demo — the DDD core.
 
 Bounded contexts (each its own subpackage):
   - context_modelregistry : what *is* a registered model version, and its stage.

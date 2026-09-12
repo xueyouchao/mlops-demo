@@ -24,7 +24,7 @@ if SENTRY_DSN:
 
 INTERNAL_TOKEN = os.getenv("INTERNAL_SERVICE_TOKEN", "change-me-internal")
 
-app = FastAPI(title="Build1 — Model Serving Router", version="0.1.0")
+app = FastAPI(title="mlops-demo — Model Serving Router", version="0.1.0")
 
 _policy = rt.RoutingPolicy("breast-cancer-classifier")
 

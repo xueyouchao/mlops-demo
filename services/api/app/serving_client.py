@@ -26,7 +26,7 @@ def sync_routing(weights: dict[str, int]) -> None:
         # Serving sync is best-effort for the demo; do not break the lifecycle.
         # In production this retries with backoff and raises on persistent failure.
         import logging
-        logging.getLogger("build1.api").warning("serving routing sync failed", exc_info=True)
+        logging.getLogger("mlops-demo.api").warning("serving routing sync failed", exc_info=True)
 
 
 def sync_rollback(version_id: str) -> None:
@@ -40,4 +40,4 @@ def sync_rollback(version_id: str) -> None:
         resp.raise_for_status()
     except Exception:
         import logging
-        logging.getLogger("build1.api").warning("serving rollback sync failed", exc_info=True)
+        logging.getLogger("mlops-demo.api").warning("serving rollback sync failed", exc_info=True)

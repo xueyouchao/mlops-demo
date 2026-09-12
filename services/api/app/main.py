@@ -23,7 +23,7 @@ if _settings.sentry_dsn:
         traces_sample_rate=0.25,
     )
 
-app = FastAPI(title="Build1 — Model Lifecycle Platform API", version="0.1.0")
+app = FastAPI(title="mlops-demo — Model Lifecycle Platform API", version="0.1.0")
 
 security.seed_users()
 app.include_router(security.router)

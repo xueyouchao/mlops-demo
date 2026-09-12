@@ -34,7 +34,7 @@ async def main() -> None:
         activities=[promote_stage, rollback_stage],
         activity_executor=ThreadPoolExecutor(max_workers=4),
     )
-    print("Build1 worker connected, starting...", flush=True)
+    print("mlops-demo worker connected, starting...", flush=True)
     await worker.run()
 
 

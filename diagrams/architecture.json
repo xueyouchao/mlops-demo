@@ -2,7 +2,7 @@
   "schema_version": 1,
   "diagram_type": "architecture",
   "meta": {
-    "title": "Build1 ML Lifecycle Platform",
+    "title": "mlops-demo ML Lifecycle Platform",
     "output": "diagrams/architecture.html",
     "viewBox": [1140, 660],
     "animation": "trace",
@@ -41,7 +41,7 @@
   "boundaries": [
     {
       "kind": "region",
-      "label": "docker-compose build1-mlops",
+      "label": "docker-compose mlops-demo",
       "wraps": ["ui", "api", "serving", "worker", "temporal", "mlflow", "postgres"]
     }
   ],

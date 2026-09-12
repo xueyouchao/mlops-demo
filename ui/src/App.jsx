@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 /**
- * Build1 — Model Lifecycle Ops Console → single-origin harness.
+ * mlops-demo — Model Lifecycle Ops Console → single-origin harness.
  * Left sidebar switches tabs between the inline lifecycle console and
  * embedded same-origin apps (diagrams, Temporal UI, MLflow UI, API docs).
  * Auth is a JWT held in an HttpOnly cookie set by the api service (same origin).
@@ -76,7 +76,7 @@ function Login() {
   const [pw, setPw] = useState("");
   return (
     <div className="login">
-      <h1>Build1 — Model Lifecycle Platform</h1>
+      <h1>mlops-demo — Model Lifecycle Platform</h1>
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -169,7 +169,7 @@ function Shell({ me, onLogout }) {
   return (
     <div className="harness">
       <aside className="sidebar">
-        <div className="brand">Build1</div>
+        <div className="brand">mlops-demo</div>
         {SECTIONS.map((sec) => (
           <div className="section" key={sec.label}>
             <div className="section-label">{sec.label}</div>
