@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /workspace
+COPY services/serving/requirements.txt /workspace/requirements.txt
+RUN pip install --no-cache-dir -r /workspace/requirements.txt
+
+# shared domain package (DDD core) — importable via PYTHONPATH=/workspace
+COPY packages/ml_platform /workspace/ml_platform
+
+COPY services/serving/app /workspace/app
+
+ENV PYTHONPATH="/workspace"
+EXPOSE 8001
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

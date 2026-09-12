@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ml-platform-domain"
+version = "0.1.0"
+description = "Build1 DDD domain core — model registry, lifecycle, serving contexts"
+requires-python = ">=3.11"
+dependencies = []  # domain is dependency-free; adapters (FastAPI/Temporal/MLflow) live in services
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ml_platform*"]

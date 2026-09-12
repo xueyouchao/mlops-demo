@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light dark;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #eef0f4; color: #14161a; }
+button { font: inherit; }
+
+/* ---------- Login ---------- */
+.login { max-width: 360px; margin: 90px auto; text-align: center; padding: 0 16px; }
+.login h1 { font-size: 22px; }
+.login form { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.login input { padding: 10px 12px; border: 1px solid #999; border-radius: 8px; font-size: 15px; }
+.login button { padding: 10px 12px; border-radius: 8px; border: 1px solid #2563eb; background: #2563eb; color: #fff; font-size: 15px; cursor: pointer; }
+.login button:hover { background: #1d4ed8; }
+.hint { font-size: 12px; opacity: 0.6; }
+
+/* ---------- Harness shell ---------- */
+.harness { display: flex; height: 100vh; overflow: hidden; }
+
+.sidebar {
+  width: 230px;
+  flex: 0 0 230px;
+  background: #161a1f;
+  color: #e6e9ee;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 10px;
+}
+.brand { font-size: 17px; font-weight: 700; letter-spacing: 0.03em; padding: 6px 10px 14px; color: #fff; }
+.section { margin-top: 6px; }
+.section-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #7c8896; padding: 6px 10px 4px; }
+.nav {
+  display: block; width: 100%; text-align: left;
+  padding: 8px 10px; margin: 1px 0; border: 0; border-radius: 6px;
+  background: transparent; color: #cfd6df; cursor: pointer; font-size: 13.5px;
+}
+.nav:hover { background: #232a32; color: #fff; }
+.nav.active { background: #2563eb; color: #fff; }
+.spacer { flex: 1; }
+.who-line { border-top: 1px solid #2b333c; padding: 10px 10px 2px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: #9aa5b1; }
+.who-line .ghost { background: transparent; border: 1px solid #3a4450; color: #cfd6df; border-radius: 6px; padding: 5px 8px; cursor: pointer; }
+.who-line .ghost:hover { background: #232a32; color: #fff; }
+
+/* ---------- Main pane ---------- */
+.pane { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #13161a; }
+.pane-head {
+  height: 42px; flex: 0 0 42px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px; background: #0f1216; color: #e6e9ee; border-bottom: 1px solid #222a33;
+}
+.pane-title { font-size: 14px; font-weight: 600; }
+.pane-group { font-size: 12px; color: #7c8896; }
+.pane .frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.pane .ops {
+  flex: 1; background: #eef0f4; overflow: auto; padding: 20px; max-width: 980px; margin: 0 auto; width: 100%;
+}
+.pane .ops header { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 4px; }
+.pane .ops .who { font-size: 13px; opacity: 0.7; }
+
+/* ---------- Ops console content (inline tab) ---------- */
+.ops { color: #14161a; }
+.ops section { background: #fff; border: 1px solid #dde1e7; border-radius: 10px; padding: 16px; margin-top: 14px; }
+.ops h1 { font-size: 20px; } .ops h2 { font-size: 15px; margin-top: 0; }
+.ops button { margin-right: 8px; padding: 6px 12px; border-radius: 6px; border: 1px solid #2563eb; background: #eef3ff; color: #1d4ed8; cursor: pointer; }
+.ops button:hover { background: #dbe6ff; }
+.ops table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ops td, .ops th { border: 1px solid #eef0f4; padding: 6px 8px; text-align: left; }
+.stage-production { color: #0a7; font-weight: 600; }
+.stage-staging { color: #a70; }
+.ops input { padding: 5px; border: 1px solid #999; border-radius: 4px; }
+.ops pre { background: #0e1116; color: #d3e0f0; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 260px; }
+.err { background: #fdd; border: 1px solid #c66; color: #800; padding: 8px 12px; border-radius: 6px; margin: 10px 0; }

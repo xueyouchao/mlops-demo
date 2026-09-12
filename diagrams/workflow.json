@@ -1,0 +1,112 @@
+{
+ "schema_version": 1,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "Model Promotion Workflow",
+  "output": "diagrams/workflow.html",
+  "animation": "trace",
+  "quality_profile": "showcase",
+  "views": [
+   {
+    "id": "train-to-gate",
+    "label": "Train to gate",
+    "focus": ["train", "register", "stage", "promote"],
+    "note": "The version is produced, registered, and staged automatically."
+   },
+   {
+    "id": "approval-to-prod",
+    "label": "Approve and promote",
+    "focus": ["promote", "gate", "approve", "production"],
+    "note": "The durable approval gate and the transition to live production."
+   },
+   {
+    "id": "serve-and-rollback",
+    "label": "Serve and rollback",
+    "focus": ["production", "route", "rollback"],
+    "note": "Weighted serving and the blue-green rollback path."
+   }
+  ]
+ },
+ "lanes": [
+  { "id": "trainer", "label": "Trainer (one-shot)" },
+  { "id": "api", "label": "API lifecycle facade" },
+  { "id": "temporal", "label": "Temporal orchestration" },
+  { "id": "registry", "label": "MLflow registry" },
+  { "id": "serving", "label": "Serving router" },
+  { "id": "exceptions", "label": "Failure + rollback", "variant": "exception" }
+ ],
+ "phases": [
+  { "id": "produce", "label": "Produce", "fromCol": 0, "toCol": 1 },
+  { "id": "gate", "label": "Approval gate", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+  { "id": "serve", "label": "Serve + observe", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+ ],
+ "groups": [
+  { "id": "gate_work", "label": "Human gate", "lane": "temporal", "fromCol": 2, "toCol": 3, "variant": "security" },
+  { "id": "rollback_work", "label": "Recovery path", "lane": "exceptions", "fromCol": 3, "toCol": 5, "variant": "security" }
+ ],
+ "mainPath": [
+  "train",
+  "register",
+  "stage",
+  "promote",
+  "gate",
+  "approve",
+  "production",
+  "route"
+ ],
+ "nodes": [
+  { "id": "train", "lane": "trainer", "col": 0, "type": "backend", "label": "Train", "sublabel": "GradientBoosting", "tag": "auto" },
+  { "id": "register", "lane": "registry", "col": 0, "type": "cloud", "label": "Register", "sublabel": "model version", "tag": "auto" },
+  { "id": "stage", "lane": "registry", "col": 1, "type": "database", "label": "Stage", "sublabel": "auto-stage to Staging" },
+  { "id": "promote", "lane": "api", "col": 2, "type": "backend", "label": "Promote", "sublabel": "start workflow" },
+  { "id": "gate", "lane": "temporal", "col": 2, "type": "messagebus", "label": "Approval Gate", "sublabel": "wait on signal", "tag": "durable" },
+  { "id": "approve", "lane": "api", "col": 3, "type": "security", "label": "Approve", "sublabel": "operator identity", "tag": "human" },
+  { "id": "production", "lane": "registry", "col": 4, "type": "database", "label": "Production", "sublabel": "stage transition" },
+  { "id": "route", "lane": "serving", "col": 4, "type": "cloud", "label": "Serve", "sublabel": "canary 100%", "tag": "weights" },
+  { "id": "verify", "lane": "serving", "col": 5, "type": "frontend", "label": "Verify", "sublabel": "smoke + SLO" },
+  { "id": "rejected", "lane": "exceptions", "col": 2, "type": "security", "label": "Reject", "sublabel": "gate denied" },
+  { "id": "rollback", "lane": "exceptions", "col": 4, "type": "messagebus", "label": "Rollback", "sublabel": "blue-green flip", "tag": "on-call" }
+ ],
+ "edges": [
+  { "from": "train", "to": "register", "label": "artifact", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+  { "from": "register", "to": "stage", "variant": "emphasis" },
+  { "from": "stage", "to": "promote", "label": "request", "variant": "emphasis", "route": "up-channel", "fromSide": "top", "toSide": "top" },
+  { "from": "promote", "to": "gate", "label": "start", "variant": "security", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+  { "from": "gate", "to": "approve", "label": "signal", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+  { "from": "approve", "to": "production", "label": "transition", "variant": "emphasis" },
+  { "from": "production", "to": "route", "variant": "emphasis", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+  { "from": "route", "to": "verify", "label": "predict", "variant": "emphasis", "labelAt": [560, 662] },
+  { "from": "gate", "to": "rejected", "label": "deny", "variant": "security", "role": "error", "route": "drop", "fromSide": "bottom", "toSide": "top" },
+  { "from": "verify", "to": "rollback", "variant": "security", "role": "error", "route": "outside-right", "fromSide": "right", "toSide": "right" },
+  { "from": "rollback", "to": "production", "label": "restore", "variant": "dashed", "role": "return", "route": "return-left", "fromSide": "left", "toSide": "right" }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "One Happy Path",
+   "items": [
+    "Training runs as a one-shot job and registers a version",
+    "Staging is automatic; promotion to Production is not",
+    "Serving routes weighted traffic and verifies health"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "The Human Gate",
+   "items": [
+    "Promote starts a durable Temporal workflow",
+    "The workflow waits on the approval signal",
+    "Approve carries the operator's identity to the registry"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Recovery",
+   "items": [
+    "A denied approval stops promotion cleanly",
+    "Production health regression triggers a blue-green rollback",
+    "Rollback restores the last good version's serving weights"
+   ]
+  }
+ ]
+}

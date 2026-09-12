@@ -1,0 +1,292 @@
+{
+ "schema_version": 1,
+ "diagram_type": "sequence",
+ "meta": {
+  "title": "Promote and Approve Sequence",
+  "output": "diagrams/sequence.html",
+  "viewBox": [
+   900,
+   800
+  ],
+  "animation": "trace",
+  "quality_profile": "showcase",
+  "views": [
+   {
+    "id": "initiate",
+    "label": "Initiate promotion",
+    "focus": [
+     "operator",
+     "console",
+     "api",
+     "temporal"
+    ],
+    "note": "The operator promotes; the API starts a durable workflow."
+   },
+   {
+    "id": "approve",
+    "label": "Human approval",
+    "focus": [
+     "operator",
+     "console",
+     "api",
+     "temporal",
+     "worker",
+     "mlflow"
+    ],
+    "note": "The approve signal resumes the workflow and transitions the stage."
+   },
+   {
+    "id": "serve",
+    "label": "Route and serve",
+    "focus": [
+     "api",
+     "serving",
+     "console"
+    ],
+    "note": "Weights sync to serving and predictions route."
+   }
+  ]
+ },
+ "participants": [
+  {
+   "id": "operator",
+   "type": "external",
+   "label": "Operator",
+   "sublabel": "admin console"
+  },
+  {
+   "id": "console",
+   "type": "frontend",
+   "label": "Ops Console",
+   "sublabel": "React UI"
+  },
+  {
+   "id": "api",
+   "type": "security",
+   "label": "API Facade",
+   "sublabel": "FastAPI"
+  },
+  {
+   "id": "temporal",
+   "type": "messagebus",
+   "label": "Temporal",
+   "sublabel": "workflow engine"
+  },
+  {
+   "id": "worker",
+   "type": "backend",
+   "label": "Worker",
+   "sublabel": "Temporal activities"
+  },
+  {
+   "id": "mlflow",
+   "type": "database",
+   "label": "MLflow",
+   "sublabel": "model registry"
+  },
+  {
+   "id": "serving",
+   "type": "cloud",
+   "label": "Serving",
+   "sublabel": "canary router"
+  }
+ ],
+ "segments": [
+  {
+   "from": 160,
+   "to": 330,
+   "label": "Initiate promotion"
+  },
+  {
+   "from": 350,
+   "to": 590,
+   "label": "Human approval gate"
+  },
+  {
+   "from": 600,
+   "to": 665,
+   "label": "Route + serve"
+  }
+ ],
+ "messages": [
+  {
+   "id": "click-promote",
+   "from": "operator",
+   "to": "console",
+   "y": 185,
+   "label": "click Promote",
+   "variant": "default"
+  },
+  {
+   "id": "post-promote",
+   "from": "console",
+   "to": "api",
+   "y": 215,
+   "label": "POST /models/1/promote",
+   "variant": "emphasis"
+  },
+  {
+   "id": "start-wf",
+   "from": "api",
+   "to": "temporal",
+   "y": 250,
+   "label": "start PromotionWorkflow",
+   "variant": "emphasis"
+  },
+  {
+   "id": "wf-wait",
+   "from": "temporal",
+   "to": "api",
+   "y": 285,
+   "label": "workflow_id (awaiting)",
+   "variant": "return"
+  },
+  {
+   "id": "awaiting",
+   "from": "api",
+   "to": "console",
+   "y": 320,
+   "label": "awaiting approval",
+   "variant": "return"
+  },
+  {
+   "id": "click-approve",
+   "from": "operator",
+   "to": "console",
+   "y": 380,
+   "label": "click Approve",
+   "variant": "default"
+  },
+  {
+   "id": "post-approve",
+   "from": "console",
+   "to": "api",
+   "y": 415,
+   "label": "POST /models/1/approve",
+   "variant": "emphasis"
+  },
+  {
+   "id": "send-signal",
+   "from": "api",
+   "to": "temporal",
+   "y": 430,
+   "label": "signal approval",
+   "variant": "security"
+  },
+  {
+   "id": "dispatch-activity",
+   "from": "temporal",
+   "to": "worker",
+   "y": 470,
+   "label": "dispatch promote_stage",
+   "variant": "default"
+  },
+  {
+   "id": "transition",
+   "from": "worker",
+   "to": "mlflow",
+   "y": 505,
+   "label": "transition to Production",
+   "variant": "security"
+  },
+  {
+   "id": "stage-done",
+   "from": "mlflow",
+   "to": "worker",
+   "y": 540,
+   "label": "Production",
+   "variant": "return"
+  },
+  {
+   "id": "sync-routing",
+   "from": "api",
+   "to": "serving",
+   "y": 575,
+   "label": "sync routing weights",
+   "variant": "dashed"
+  },
+  {
+   "id": "production-ok",
+   "from": "api",
+   "to": "console",
+   "y": 615,
+   "label": "production",
+   "variant": "return"
+  },
+  {
+   "id": "render",
+   "from": "console",
+   "to": "operator",
+   "y": 650,
+   "label": "production live",
+   "variant": "return"
+  }
+ ],
+ "activations": [
+  {
+   "participant": "console",
+   "from": 215,
+   "to": 650,
+   "type": "frontend"
+  },
+  {
+   "participant": "api",
+   "from": 250,
+   "to": 610,
+   "type": "security"
+  },
+  {
+   "participant": "temporal",
+   "from": 250,
+   "to": 460,
+   "type": "messagebus"
+  },
+  {
+   "participant": "worker",
+   "from": 460,
+   "to": 535,
+   "type": "backend"
+  },
+  {
+   "participant": "mlflow",
+   "from": 500,
+   "to": 535,
+   "type": "database"
+  },
+  {
+   "participant": "serving",
+   "from": 570,
+   "to": 600,
+   "type": "cloud"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "emerald",
+   "title": "Promotion is durable",
+   "items": [
+    "The API starts a Temporal PromotionWorkflow, not a sync call",
+    "The workflow reports its id and waits on the signal",
+    "The operator's approve click resumes the exact workflow"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Identity travels",
+   "items": [
+    "Approve carries the operator identity via the signal",
+    "The promote_stage activity applies the stage transition",
+    "MLflow is the source of truth; state sync is observable"
+   ]
+  },
+  {
+   "dot": "orange",
+   "title": "Sync is async",
+   "items": [
+    "Routing weight sync to serving is best-effort",
+    "Predictions route per weights after promotion",
+    "Failures surface to a warning, never block production"
+   ]
+  }
+ ]
+}

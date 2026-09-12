@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Model Version Lifecycle",
+    "output": "diagrams/lifecycle.html",
+    "viewBox": [860, 660],
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "happy-path",
+        "label": "Promotion rail",
+        "focus": ["registered", "staging", "production"],
+        "note": "The main path a model version takes to reach live production."
+      },
+      {
+        "id": "approval-gate",
+        "label": "Human approval gate",
+        "focus": ["staging", "approval", "denied"],
+        "note": "Promotion pauses on the approval gate and can be denied."
+      },
+      {
+        "id": "terminal",
+        "label": "Rollback + archived",
+        "focus": ["production", "rolled_back", "archived"],
+        "note": "Blue-green rollback and the terminal retired state."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "main", "label": "Registry stages" },
+    { "id": "gate", "label": "Approval gate" },
+    { "id": "terminal", "label": "Terminal + rollback" }
+  ],
+  "states": [
+    { "id": "registered", "type": "start", "label": "Registered", "sublabel": "version created", "lane": "main", "col": 0, "step": "01" },
+    { "id": "staging", "type": "active", "label": "Staging", "sublabel": "auto-staged", "lane": "main", "col": 1, "step": "02" },
+    { "id": "production", "type": "success", "label": "Production", "sublabel": "serving canary 100%", "lane": "main", "col": 2, "step": "04" },
+    { "id": "approval", "type": "waiting", "label": "Awaiting Approval", "sublabel": "Temporal signal wait", "lane": "gate", "col": 0, "tag": "human" },
+    { "id": "denied", "type": "failure", "label": "Denied", "sublabel": "rejected", "lane": "terminal", "col": 0, "tag": "end" },
+    { "id": "rolled_back", "type": "active", "label": "Rolled Back", "sublabel": "blue-green flip", "lane": "terminal", "col": 1, "step": "05" },
+    { "id": "archived", "type": "neutral", "label": "Archived", "sublabel": "retired / immutable", "lane": "terminal", "col": 2, "step": "06", "tag": "end" }
+  ],
+  "transitions": [
+    { "from": "registered", "to": "staging", "label": "auto-stage", "labelAt": [230, 210] },
+    { "from": "staging", "to": "approval", "label": "promote requested", "variant": "security", "route": "drop" },
+    { "from": "approval", "to": "denied", "label": "reject", "variant": "security", "route": "drop" },
+    { "from": "approval", "to": "production", "label": "approve", "variant": "emphasis" },
+    { "from": "production", "to": "rolled_back", "label": "rollback", "variant": "security", "fromSide": "bottom", "toSide": "top", "via": [[520, 188], [520, 360], [556, 360], [556, 440]] },
+    { "from": "rolled_back", "to": "archived", "label": "retire", "variant": "dashed", "labelAt": [633, 524] }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Promotion Rail",
+      "items": [
+        "Trainer registers a version and auto-stages it",
+        "Promotion is not automatic — it stops at the gate",
+        "Production is reached only after human approval"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Approval Gate",
+      "items": [
+        "Promote starts a durable Temporal workflow",
+        "The workflow waits on the approval signal",
+        "Approve or reject both end the wait cleanly"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Terminal + Rollback",
+      "items": [
+        "Rollback is a blue-green flip to the prior version",
+        "Archived versions are immutable in the registry",
+        "A denied approval is a clean terminal exit"
+      ]
+    }
+  ]
+}

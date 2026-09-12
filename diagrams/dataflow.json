@@ -1,0 +1,194 @@
+{
+ "schema_version": 1,
+ "diagram_type": "dataflow",
+ "meta": {
+  "title": "Training and Lineage Data Flow",
+  "output": "diagrams/dataflow.html",
+  "viewBox": [
+   1100,
+   700
+  ],
+  "animation": "trace",
+  "quality_profile": "showcase",
+  "views": [
+   {
+    "id": "train-path",
+    "label": "Train and evaluate",
+    "focus": [
+     "dataset",
+     "train"
+    ],
+    "note": "The Breast Cancer Wisconsin data becomes a trained, measured model."
+   },
+   {
+    "id": "register-path",
+    "label": "Register and stage",
+    "focus": [
+     "run",
+     "registry",
+     "staging"
+    ],
+    "note": "Run facts and lineage land in the MLflow registry as a staged version."
+   },
+   {
+    "id": "serve-path",
+    "label": "Serve",
+    "focus": [
+     "serving",
+     "production"
+    ],
+    "note": "The production version serves weighted predictions."
+   }
+  ]
+ },
+ "stages": [
+  {
+   "label": "Source"
+  },
+  {
+   "label": "Train"
+  },
+  {
+   "label": "Log"
+  },
+  {
+   "label": "Register"
+  },
+  {
+   "label": "Serve"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "dataset",
+   "type": "external",
+   "label": "Breast Cancer Wis.",
+   "sublabel": "sklearn load",
+   "stage": 0,
+   "row": 0,
+   "tag": "569 x 30"
+  },
+  {
+   "id": "train",
+   "type": "backend",
+   "label": "GradientBoosting",
+   "sublabel": "stratified 80/20",
+   "stage": 1,
+   "row": 0
+  },
+  {
+   "id": "run",
+   "type": "backend",
+   "label": "MLflow Run",
+   "sublabel": "params \u00b7 metrics \u00b7 lineage",
+   "stage": 2,
+   "row": 0
+  },
+  {
+   "id": "registry",
+   "type": "database",
+   "label": "Registry",
+   "sublabel": "model version",
+   "stage": 3,
+   "row": 0,
+   "tag": "source of truth"
+  },
+  {
+   "id": "staging",
+   "type": "cloud",
+   "label": "Staging",
+   "sublabel": "awaiting gate",
+   "stage": 3,
+   "row": 1
+  },
+  {
+   "id": "production",
+   "type": "database",
+   "label": "Production",
+   "sublabel": "approved version",
+   "stage": 3,
+   "row": 2,
+   "tag": "canary 100%"
+  },
+  {
+   "id": "serving",
+   "type": "backend",
+   "label": "Serving Router",
+   "sublabel": "load artifact",
+   "stage": 4,
+   "row": 0,
+   "tag": "weights"
+  }
+ ],
+ "flows": [
+  {
+   "from": "dataset",
+   "to": "train",
+   "label": "features + target",
+   "variant": "emphasis"
+  },
+  {
+   "from": "train",
+   "to": "run",
+   "label": "log metrics \u00b7 artifact",
+   "variant": "emphasis",
+   "labelAt": [
+    423,
+    203
+   ]
+  },
+  {
+   "from": "run",
+   "to": "registry",
+   "label": "register version",
+   "variant": "emphasis"
+  },
+  {
+   "from": "registry",
+   "to": "staging",
+   "label": "auto-stage",
+   "variant": "emphasis"
+  },
+  {
+   "from": "staging",
+   "to": "production",
+   "label": "approve",
+   "variant": "security"
+  },
+  {
+   "from": "production",
+   "to": "serving",
+   "label": "publish weights",
+   "variant": "emphasis"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Facts flow to the registry",
+   "items": [
+    "Dataset, split, params, metrics, and artifact log as one run",
+    "Lineage is captured beside the artifact in MLflow",
+    "The registry is the versioned source of truth"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "Promotion is a gate",
+   "items": [
+    "Auto-stage lands the version in Staging",
+    "Human approval moves it to Production",
+    "Serving loads the approved version's artifact"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Serve weighted",
+   "items": [
+    "Serving routes predictions per canary weights",
+    "Rollback returns traffic to the last good version",
+    "Lineage stays queryable end to end"
+   ]
+  }
+ ]
+}
