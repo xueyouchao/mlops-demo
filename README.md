@@ -1,4 +1,4 @@
-# Build1 — End-to-End ML Lifecycle Platform
+# mlops-demo — Build1 End-to-End ML Lifecycle Platform
 
 A runnable, `docker-compose` microservice that owns the **end-to-end model lifecycle** — a portfolio centerpiece for a TetraScience-flavored ML/MLOps role.
 
