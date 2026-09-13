@@ -124,7 +124,13 @@ services:
       context: .
       dockerfile: services/worker/Dockerfile
     container_name: mlops-demo-worker
-    environment: *id001
+    # Worker-only agent knobs, merged over the shared env: the brain can be
+    # swapped or the fallback demoed by recreating this one service, no rebuild.
+    environment:
+      <<: *id001
+      AGENT_BRAIN_MODEL: ${AGENT_BRAIN_MODEL:-deepseek-v4.1-flash:cloud}
+      AGENT_FALLBACK: ${AGENT_FALLBACK:-auto}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://172.23.0.1:11434}
     depends_on:
       postgres:
         condition: service_healthy

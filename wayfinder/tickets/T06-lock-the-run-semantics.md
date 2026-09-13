@@ -34,7 +34,7 @@ Settle:
 
 [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) settled the **step cap and its unit** — the cap counts brain calls and sits at 8, activity retries do not consume it, and a malformed decision does (so a confused brain self-terminates). It also settled the **three endings** (`conclude`, `budget_exhausted`, hard failure) as typed terminal entries. Do not re-decide those here. What remains on this ticket: the wall-clock ceiling, per-tool retry policies, what must survive which restarts, the scripted-fallback selection, and where run state is surfaced.
 
-**Measured input for the budget** (from [Choose the brain model & structured tool-call output](T08-choose-the-brain-model-and-tool-call-output.md), 2026-09-13): the chosen brain returns one decision in **2.9 s p50, 3.1 s worst case** at a realistic ~700-token step-6 prompt, so an 8-step run is roughly **25 s of model time** before any tool time. Two requirements come attached: a **generous `num_predict`** (4096 measured — a 512 cap truncated mid-thinking and silently returned no tool call at all), and treating `done_reason == "length"` as a typed `truncated` failure rather than an empty decision.
+**Measured input for the budget** (from [Choose the brain model & structured tool-call output](T08-choose-the-brain-model-and-tool-call-output.md), 2026-09-13): the chosen brain returns one decision in **2.9 s p50, 3.1 s worst case** at a realistic ~700-token step-6 prompt, so an 8-step run is roughly **25 s of model time** before any tool time. *(Superseded the same day: the operator's chosen brain is now `deepseek-v4.1-flash:cloud` at **12.9 s p50 / 36.5 s worst** — do not size anything on the 2.9 s figure. See the amendment at the end of this ticket.)* Two requirements come attached: a **generous `num_predict`** (4096 measured — a 512 cap truncated mid-thinking and silently returned no tool call at all), and treating `done_reason == "length"` as a typed `truncated` failure rather than an empty decision.
 
 ## Resolution
 
@@ -44,7 +44,8 @@ Grilled one question at a time. Six decisions.
 
 **2. Only the worker kill is a must-have.** The other restarts are recorded as behaviour to *verify*, not to design around: Temporal persists history server-side, so a run survives a Temporal restart; an API restart drops in-memory sessions so the operator logs in again (already true today); an ollama restart costs one failed brain call, which retries; an MLflow restart fails one tool call, which retries. Designing for all five would expand the build well past the destination.
 
-**3. Three minutes of work, measured on the workflow clock, excluding the human gate.** A healthy run is ~25 s of model time plus tool time (training at most twice, ~20 s each), so the ceiling never fires in a good demo — it exists to stop a wedged activity. **The approval wait is excluded**: the gate is a human and unbounded by design, and counting it would kill a run that is correctly waiting on the operator.
+**3. Six minutes of work, measured on the workflow clock, excluding the human gate.** A healthy run is model time plus tool time (training at most twice, ~20 s each), so the ceiling never fires in a good demo — it exists to stop a wedged activity. **The approval wait is excluded**: the gate is a human and unbounded by design, and counting it would kill a run that is correctly waiting on the operator.
+  *Amended from three minutes, 2026-09-13 — see the amendment at the end.* The three-minute figure was computed for a brain at 2.9 s per call. The operator then chose `deepseek-v4.1-flash:cloud`, measured at **12.9 s p50 / 36.5 s worst** per call, so eight steps is ~103 s at the median and ~4.9 min at the tail *before* any tool time — three minutes would have ended slow draws as `budget_exhausted` before the agent could file its proposal.
   *Correction carried back to [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md):* the time source is `workflow.now()` / `workflow.time()`, the SDK's deterministic workflow-perspective clock. T01's replay rule said "no `workflow.now()`", which was over-strict — the banned call is `datetime.now()`. Fixed there; the rule now reads *the workflow clock, never the stdlib clock*.
 
 **4. A consecutive identical call terminates the run as `no_progress`.** Same tool, same arguments, twice in a row — provably wasted, since nothing happened in between, so it cannot produce a false positive. Deliberately narrower than banning repeats outright: re-reading the registry *after* a training is legitimate, because the state changed. This is a **fourth terminal reason**, recorded in T01 alongside the other three so the build session sees one list.
@@ -56,4 +57,14 @@ Grilled one question at a time. Six decisions.
 **Run state** is the loop's terminal entry (T01) plus Temporal's own workflow status: running / awaiting-approval / concluded / failed, with `budget_exhausted` and `no_progress` distinguishable from a hard failure.
 
 **Deliberately not adopted: Continue-As-New.** At cap 8 with bounded digests the history is nowhere near the 51,200-event or 50 MB ceilings, so no transcript bound is needed to reach the destination. It stays the sanctioned remedy if runs ever get longer.
+
+## Amendment — 2026-09-13: the ceiling moves from three minutes to six
+
+Six minutes covers the measured worst case with the operator's chosen brain — eight steps × 36.5 s ≈ 4.9 min, plus tool time (one or two trainings at ~20 s) ≈ **5.4 min** — and leaves the step cap of 8 exactly where it was, so one thing changed and not two.
+
+What did **not** change: the ceiling is still measured on the workflow clock, still excludes the approval wait, and the four terminal reasons are untouched. `budget_exhausted` remains a real ending; six minutes is a stop for a wedged activity, not a target to fill.
+
+Recorded because the alternative was worse in a way that matters to this map: leaving three minutes would mean accepting that a slow draw ends the run early — a demo of *durability* failing for a reason that has nothing to do with durability. The latency is a measurement, not an estimate: 5 runs of the step-6 scenario, **5/5 valid tool calls, p50 12.9 s, max 36.5 s** (see the amendment in [Choose the brain model & structured tool-call output](T08-choose-the-brain-model-and-tool-call-output.md)).
+
+**One consequence left deliberately unaddressed:** the brain activity's own timeout stays at 60 s. That is ~1.6× the worst call observed, and a call that overruns it falls back to the scripted policy — a labelled degradation, which is the designed behaviour rather than a failure. Raising the timeout instead would let a single slow call eat a quarter of the run's budget.
 

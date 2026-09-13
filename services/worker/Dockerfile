@@ -11,6 +11,7 @@ COPY packages/ml_platform /workspace/ml_platform
 COPY services/worker/main.py /workspace/main.py
 COPY services/worker/workflows.py /workspace/workflows.py
 COPY services/worker/activities.py /workspace/activities.py
+COPY services/worker/brain.py /workspace/brain.py
 
 ENV PYTHONPATH="/workspace"
 CMD ["python", "main.py"]

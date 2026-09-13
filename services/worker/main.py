@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import promote_stage, rollback_stage, train_and_register
+from activities import brain_decide, promote_stage, rollback_stage, train_and_register
 from workflows import PromotionWorkflow, RollbackWorkflow, TrainingWorkflow
 
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "temporal")
@@ -31,7 +31,7 @@ async def main() -> None:
         client,
         task_queue="ml-lifecycle",
         workflows=[PromotionWorkflow, RollbackWorkflow, TrainingWorkflow],
-        activities=[promote_stage, rollback_stage, train_and_register],
+        activities=[promote_stage, rollback_stage, train_and_register, brain_decide],
         activity_executor=ThreadPoolExecutor(max_workers=4),
     )
     print("mlops-demo worker connected, starting...", flush=True)

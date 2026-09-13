@@ -56,3 +56,13 @@ Grilled one question at a time. Four decisions, plus the schemas they imply.
 **Read-only boundary, unchanged from the map:** the agent has no tool that approves a promotion and none that rolls back production.
 
 Feeds [Decide the proposal handoff into the approval gate](T05-decide-the-proposal-handoff-into-the-approval-gate.md) (the pending workflow id and the rationale are the handoff's raw material) and [Lock the run semantics](T06-lock-the-run-semantics.md) (per-tool retry policies follow from decision 5, and the training cap is a run-level counter in workflow state).
+
+## Amendment — 2026-09-13: every tool gains a required `why` argument
+
+Each of the six schemas gained **one required argument, `why`**, during the build. The tool *surface* is unchanged — six tools, same names, same real arguments — but every call now carries one sentence from the model saying why that call, right now.
+
+The reason is a measurement, not a preference. On the operator's chosen brain (`deepseek-v4.1-flash:cloud`), a rationale asked for in **prose** arrived **0 times out of 5**, while the tool calls themselves were correct **5/5** — this model reasons in `thinking`, which [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) deliberately does not record. Asked for as an **argument**, the same model filled it **5/5**, and the text was better than prose ever was: *"Confirm v6 is registered in Staging with its artifact present and that no promotion request is already pending before proposing."*
+
+Where it lands: the brain activity lifts `why` back **out** of the arguments before returning, so what the workflow validates and the tools execute is exactly the schemas above. The lifted sentence becomes the step's `rationale` — which is what the console renders, so the demo's "why" survives a model that does not narrate.
+
+Cost, stated plainly: a required argument is one more thing a model can get wrong, and `propose_promotion` now carries two rationales — its own `rationale` argument (for the operator, about the *version*) and the step's `why` (for the viewer, about the *call*). They answer different questions, and both are deliberate.

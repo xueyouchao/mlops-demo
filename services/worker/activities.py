@@ -22,6 +22,8 @@ from mlflow.tracking import MlflowClient
 
 from ml_platform.registry_health import artifact_problem
 
+import brain
+
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
 # Fixed so a given hyperparameter set always reproduces the same run — the
@@ -168,3 +170,22 @@ def _data_hash(X, y) -> str:
     return hashlib.sha256(
         np.ascontiguousarray(X).tobytes() + np.ascontiguousarray(y).tobytes()
     ).hexdigest()[:16]
+
+
+@activity.defn
+def brain_decide(payload: dict) -> dict:
+    """One step of the loop: which tool, with what arguments, and why.
+
+    The workflow refers to this by **string name** (`"brain_decide"`), so the
+    workflow sandbox never imports this module — which matters more here than
+    elsewhere, because `brain` reaches ollama over the network.
+
+    **It does not raise for a verdict.** A truncated answer, a response carrying
+    no tool call, and a model that cannot be reached are all typed envelopes the
+    workflow records as an observation and spends a step on. What escapes is a
+    genuine bug, which is what an activity retry is for.
+
+    Parsing is deliberately tolerant: an unknown tool name comes back as-is,
+    because checking it against the allow-list is the workflow's job.
+    """
+    return brain.decide(payload["goal"], payload.get("transcript") or [])

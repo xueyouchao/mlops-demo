@@ -13,7 +13,7 @@ This repo has no external issue tracker, so the wayfinder map and its tickets li
 ---
 id: TNN                      # stable id, used for blocking references
 title: <human-readable name> # the ticket's name — link it by this
-labels: [wayfinder:<type>]   # research | prototype | grilling | task
+labels: [wayfinder:<type>]   # research | prototype | grilling | task | build
 status: open                 # open | closed
 assignee: ""                 # empty = unclaimed; setting it IS the claim
 blocked-by: []               # ticket ids; unblocked when all are closed
@@ -37,3 +37,4 @@ Because tickets are files rather than tracker records, blocking can be written i
 - `prototype` (HITL) — a cheap, rough artifact for the human to react to; deliberately throwaway.
 - `grilling` (HITL) — one-question-at-a-time conversation with the human, via `/grilling` + `/domain-modeling`.
 - `task` (HITL or AFK) — manual work that unblocks a decision; resolved when the work is done.
+- `build` (HITL) — **execution**, not a decision: a slice of the destination the map has already settled. Graduated from a closed decision ticket or from the fog, listed under the map's `## Build tickets`, and wired with `blocked-by` so the frontier is computable rather than argued about. The body differs from a decision ticket on purpose: no `## Question` (the question is closed), but `## Scope` and a **Done when:** line, and it resolves with an **`## Outcome`** recording what was actually built and what verification showed — including, when the build contradicts a decision, the amendment it forced on that decision's ticket.
