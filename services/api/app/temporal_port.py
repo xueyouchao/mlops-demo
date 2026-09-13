@@ -39,6 +39,15 @@ async def _client() -> TemporalClient:
     return await TemporalClient.connect(f"{_settings().temporal_host}:{_settings().temporal_port}")
 
 
+async def temporal_client() -> TemporalClient:
+    """The Temporal client, for callers outside this module.
+
+    The agent's read path needs it: it reads runs from the *server*, so that the
+    console still shows every completed step while the worker is dead.
+    """
+    return await _client()
+
+
 class TemporalLifecyclePort(orch.LifecyclePort):
     def start_promotion(self, event: ev.PromotionApprovalRequested) -> str:
         return asyncio.run(self._start(event))

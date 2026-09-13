@@ -1,17 +1,20 @@
-"""Routes for starting an investigation run.
+"""Routes for the investigation agent: starting a run, and reading one back.
 
-A run is a durable Temporal workflow — the ReAct loop — so starting one is a
-workflow start, the same shape as the promote route: role-gated, and the workflow
-id is the handle the console uses from then on.
+Starting is a workflow start, the same shape as the promote route: role-gated,
+with the workflow id as the handle from then on.
 
-The goal is free text. Presets live in the console and simply fill this field, so
-there is one way to start a run and one thing recorded as its input.
+Reading is the part that matters for the demo. Both read routes project the run
+from the Temporal **server** — status and history — so they keep working while
+the worker is dead, which is precisely when the console has to show something.
 """
 from __future__ import annotations
+
+import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from . import agent_read, security
 from .security import require_role
 from .state import state
 
@@ -40,3 +43,28 @@ def start_run(body: RunRequest, user=Depends(require_role("operator", "admin")))
     except Exception as e:
         raise HTTPException(502, f"could not start the run: {e}") from e
     return {"ok": True, "run_id": run_id, "status": "RUNNING", "goal": goal}
+
+
+@router.get("/runs")
+def list_runs(user=Depends(security.get_current_user)):
+    """Investigations, newest first — read from Temporal, not from the worker."""
+    try:
+        runs = asyncio.run(agent_read.list_runs())
+    except Exception as e:
+        raise HTTPException(503, f"Temporal is not reachable: {e}") from e
+    return {"runs": runs, "source": "temporal-history"}
+
+
+@router.get("/runs/{run_id}")
+def get_run(run_id: str, user=Depends(security.get_current_user)):
+    """One investigation, projected from its own event history.
+
+    Works with the worker stopped, mid-step, or dead: history is on the Temporal
+    service, and a query — which the worker would have to answer — is never used.
+    """
+    try:
+        return asyncio.run(agent_read.load_run(run_id))
+    except agent_read.RunNotFound:
+        raise HTTPException(404, f"no investigation run {run_id}")
+    except Exception as e:
+        raise HTTPException(503, f"Temporal is not reachable: {e}") from e

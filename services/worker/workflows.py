@@ -219,14 +219,31 @@ AGENT_TOOLS = (
 # Per-tool retry and timeout policy: reads and evaluate 3 attempts, train 2,
 # propose 1 — never retried, because a verdict must never be retried and a blip
 # must be. The framework's default is infinite attempts, so each is explicit.
-AGENT_TOOL_POLICY: dict[str, tuple[int, timedelta]] = {
-    "read_registry": (3, timedelta(seconds=60)),
-    "read_run_metrics": (3, timedelta(seconds=60)),
-    "evaluate_version": (3, timedelta(seconds=120)),
-    "train_candidate": (2, timedelta(minutes=5)),
-    "propose_promotion": (1, timedelta(seconds=60)),
-    "conclude": (1, timedelta(seconds=30)),
+AGENT_TOOL_POLICY: dict[str, dict] = {
+    "read_registry": {"attempts": 3, "start_to_close": timedelta(seconds=60)},
+    "read_run_metrics": {"attempts": 3, "start_to_close": timedelta(seconds=60)},
+    "evaluate_version": {"attempts": 3, "start_to_close": timedelta(seconds=120)},
+    "train_candidate": {"attempts": 2, "start_to_close": timedelta(minutes=5),
+                        "schedule_to_start": timedelta(minutes=2)},
+    "propose_promotion": {"attempts": 1, "start_to_close": timedelta(seconds=60),
+                          "schedule_to_start": timedelta(minutes=2)},
+    # `conclude` is a pure function of its arguments, so retrying it is free —
+    # and it is the step whose loss would cost the run its ending.
+    "conclude": {"attempts": 3, "start_to_close": timedelta(seconds=30)},
 }
+
+# How long an activity task may sit *scheduled but never started*, and this one
+# is not optional here. Temporal's default is unlimited, and an unlimited wait is
+# a hang: a task delivered to a worker that dies before acknowledging it is
+# leased to nobody, and **nothing re-delivers it** — no timeout fires, because
+# `start_to_close` only begins once a task has started. Observed, not theorised:
+# a kill 8 s after step 4's brain call was scheduled left that run stalled with
+# the worker back up and healthy minutes later, and it would have stalled for
+# ever. A demo whose centrepiece is killing the worker cannot afford a run that
+# hangs when the kill lands in that window. 60 s is far beyond any queueing this
+# demo creates (one worker, four activity slots, a couple of runs) and far short
+# of an audience's patience.
+AGENT_SCHEDULE_TO_START = timedelta(seconds=60)
 
 # Above the brain activity's own 60 s request timeout plus its one retry: this is
 # the workflow-side safety net, not where the timeout is actually enforced.
@@ -303,6 +320,7 @@ class InvestigationWorkflow:
                 "brain_decide",
                 {"goal": inp.goal, "transcript": self._transcript},
                 start_to_close_timeout=AGENT_BRAIN_TIMEOUT,
+                schedule_to_start_timeout=AGENT_SCHEDULE_TO_START,
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
 
@@ -360,11 +378,12 @@ class InvestigationWorkflow:
                     "incumbent_metrics": self._evidence.get(self._production or ""),
                 })
 
-            attempts, timeout = AGENT_TOOL_POLICY[tool]
+            policy = AGENT_TOOL_POLICY[tool]
             result = await workflow.execute_activity(
                 tool, payload,
-                start_to_close_timeout=timeout,
-                retry_policy=RetryPolicy(maximum_attempts=attempts),
+                start_to_close_timeout=policy["start_to_close"],
+                schedule_to_start_timeout=policy.get("schedule_to_start", AGENT_SCHEDULE_TO_START),
+                retry_policy=RetryPolicy(maximum_attempts=policy["attempts"]),
             )
 
             # A training the idempotency lookup answered with an existing version
@@ -429,6 +448,7 @@ class InvestigationWorkflow:
                 state = await workflow.execute_activity(
                     "promotion_outcome", {"workflow_id": workflow_id},
                     start_to_close_timeout=timedelta(seconds=30),
+                    schedule_to_start_timeout=AGENT_SCHEDULE_TO_START,
                     retry_policy=RetryPolicy(maximum_attempts=3),
                 )
                 if state.get("status") != "RUNNING":

@@ -80,3 +80,15 @@ That is the demo's centrepiece failing *because of* the demo's centrepiece: a ru
 
 Also found by the same kill, and worth keeping: the in-flight activity was a `train_candidate`. It had **already registered v7** when the worker died, and the retry returned *"v7 already exists for exactly these hyperparameters and this data — reused, no new version registered."* Decision 1's idempotency lookup is therefore proven under a real SIGKILL rather than a manual double-call, which is the version of that evidence that counts.
 
+## Amendment — 2026-09-13 (third): an unlimited schedule-to-start is a hang
+
+Found by B04's acceptance test, and the most dangerous thing found so far, because its symptom is *nothing at all*. Temporal's default `schedule_to_start_timeout` is **unlimited**, and for an activity task that is delivered to a worker which dies before acknowledging it, nothing re-delivers it: `start_to_close` never begins, so no timeout ever fires, and the task stays leased to nobody.
+
+Observed, not reasoned: a run was killed 8 s after step 4's brain call was *scheduled*, and that run was still stalled minutes later with the worker back up and healthy. It would have stayed stalled for ever. Every other kill tested resumed cleanly, and the reason is now clear — in those, the activity had already **started**, so that activity's own `start_to_close` (180 s for a brain call) rescued it.
+
+This is not a theoretical hole in a demo that kills the worker on purpose: a kill landing in that window turns the climax into a run that never moves again, on stage, with no error to explain it.
+
+**What changed:** every agent activity now carries `schedule_to_start_timeout` — 60 s for the brain call, the reads, `evaluate_version` and `conclude`, and 120 s for `train_candidate` and `propose_promotion`, the two with the smallest retry budgets. Verified as written into history on a fresh run. The *rescue itself* was not reproduced, because it needs a sub-second kill window: it is recorded as a bound that exists, not as a crash survived.
+
+Decision 6's retry counts are unchanged, with one addition: `conclude` takes 3 attempts rather than 1. It is a pure function of its arguments, so retrying it is free, and it is the single step whose loss costs the run its ending.
+
