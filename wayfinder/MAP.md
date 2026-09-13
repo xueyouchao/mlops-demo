@@ -10,6 +10,8 @@ A live console demo of a **durable agent** inside the mlops-demo ops console: th
 
 Pinned by the human during charting: **no** architecture write-up or ADR, **no** eval harness, **no** cost accounting. The demo (and the engineering honesty behind it) is the deliverable.
 
+**Execution is carried into this map** (see Notes): the destination is met when the demo actually runs, not when the decisions are decided.
+
 ## Notes
 
 - **Domain**: a demo of an end-to-end ML model lifecycle platform. DDD bounded contexts (`context_modelregistry` / `context_serving` / `context_lifecycle`), Temporal durable orchestration with a human approval gate, MLflow as registry of record, Sentry for errors, and — since this session's work — real training and real inference.
@@ -26,11 +28,13 @@ Pinned by the human during charting: **no** architecture write-up or ADR, **no**
   - **Brain**: host ollama by default, behind an activity, with a deterministic scripted-policy fallback so the demo still runs when ollama is down. The loop stays real either way — only the decision-making degrades.
   - **The durability story must be real, not narrated**: the brain call is an activity (so its output is in event history and replay is deterministic), and the transcript is the workflow's own state.
   - **Word the durability claim exactly**, and never overclaim: "the run resumes where it was and the interrupted activity runs again" — *not* "nothing ever runs twice". No first-party source supports the stronger phrasing, and the demo would be asserting something false about its own tool side effects. See [Research how production durable-agent frameworks structure their loops](tickets/T09-research-durable-agent-loop-patterns.md).
+- **Execution carried into the map** (pinned by the human): this effort **overrides wayfinder's planning-only default**. The destination is a *running* demo, so the map does not end when the decisions are decided — the destination is met when the demo runs. Once the decision tickets close, build tickets graduate (from fog, or from the resolution of [Prototype the console's agent panel](tickets/T07-prototype-the-console-agent-panel.md)) until the demo runs end to end in the console, including the killed-worker resume.
 
 ## Decisions so far
 
 <!-- one line per closed ticket: enough to judge relevance, then zoom the link for detail -->
 
+- [Define the agent's tool surface & schemas](tickets/T02-define-the-agent-tool-surface-and-schemas.md) — exactly six tools, returning bounded digests; `evaluate_version` reuses the trainer's split so candidates are comparable; `propose_promotion` starts the real approval gate after a servability pre-check, so no human is asked about an unreadable artifact; training capped at 2 per run; verdicts return typed envelopes while infrastructure failures raise so retries still apply
 - [Choose the brain model & structured tool-call output](tickets/T08-choose-the-brain-model-and-tool-call-output.md) — default brain is `deepseek-v4-flash:cloud` (10/10 valid tool calls, 2.9 s p50, 3× faster than the next); native `tools` works on all eight candidates while `format` is accepted but never enforced; and a tight `num_predict` silently eats the tool call, so the budget must be generous and `done_reason=length` treated as a typed failure
 - [Lock the agent loop contract](tickets/T01-lock-the-agent-loop-contract.md) — flat ReAct (one step = one brain call → one tool → one observation); cap 8, retries free; the brain is stateless and the transcript is the memory, recording the rationale but never the raw thinking; bad output becomes an observation that burns a step; three endings, and "no better candidate" is a legitimate result rather than an error
 - [Research how production durable-agent frameworks structure their loops](tickets/T09-research-durable-agent-loop-patterns.md) — our shape *is* Temporal's shipped pattern (loop in the workflow, model call as an activity, transcript in workflow state); Temporal ships no step bound, so ours is ours alone to define; and the demo carries an at-least-once hole — a retried activity restarts from the top with its failed attempt unrolled-back, so a kill during training risks training twice

@@ -20,3 +20,7 @@ The destination says the operator approves the promotion the agent proposes, so 
 - **What happens if the operator never approves** — the workflow waits durably; decide whether it expires.
 
 Note the existing quirk this inherits: the API confirms approval optimistically (`wait_for_approval` returns `True`) because the durable wait is Temporal's. Decide whether that is acceptable given the agent now depends on the outcome.
+
+## Partly settled by the tool surface
+
+[Define the agent's tool surface & schemas](T02-define-the-agent-tool-surface-and-schemas.md) settled the **mechanism**: the agent's proposal *is* a real pending `PromotionWorkflow`, started by an activity through the Temporal client on the same `promote-<model>-<version>` id convention, after a servability pre-check that refuses an unreadable artifact before any human is asked. So the seam is fixed and the console needs no new concept of "proposal". What remains here: **what evidence travels with it**, how it is presented, what the operator sees when the guard fires, whether one run may leave two pending promotions for the same model, and what happens if the operator never approves.
