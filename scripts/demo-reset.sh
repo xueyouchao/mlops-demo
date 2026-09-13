@@ -77,6 +77,14 @@ for v in c.search_model_versions(f"name='{name}'"):
         present = bool(c.list_artifacts(v.run_id, "model"))
     except Exception:
         present = False
+    # MLflow creates model versions asynchronously ("waiting up to 300 seconds for
+    # model version to finish creation"), so a version registered seconds ago can
+    # look artifact-less and get archived by mistake. Never judge a fresh one.
+    import time
+    age_ms = int(time.time() * 1000) - int(v.creation_timestamp or 0)
+    if age_ms < 180_000:
+        print(f"  v{v.version} staging, created {age_ms // 1000}s ago — too new to judge, left alone")
+        continue
         print(f"  v{v.version} staging, artifact present — promotable")
     else:
         c.transition_model_version_stage(name, int(v.version), "Archived")
@@ -89,6 +97,15 @@ PY
 echo "· state"
 curl -sS -c "$JAR" -X POST "$API_URL/auth/token" \
   -d "username=operator&password=operator-pass" >/dev/null 2>&1
+# Optional: pin the incumbent. Approving a promotion promotes the best candidate,
+# so the next investigation honestly concludes that nothing beats production and
+# never reaches the gate — which is how a rehearsal that approves every pass walks
+# production from v7 to v19 and then cannot find a gate anywhere. Pinning puts the
+# question back: is there something better than what is serving?
+if [ -n "${DEMO_INCUMBENT:-}" ]; then
+  PIN=$(curl -sS -b "$JAR" -X POST "$API_URL/api/models/rollback?to_version_id=$DEMO_INCUMBENT" 2>/dev/null)
+  note "pinned the incumbent -> v$DEMO_INCUMBENT  ($PIN)"
+fi
 ROUTING=$(curl -sS -b "$JAR" "$API_URL/api/models/routing" 2>/dev/null)
 MODELS=$(curl -sS -b "$JAR" "$API_URL/api/models" 2>/dev/null)
 python3 - "$ROUTING" "$MODELS" <<'PY' || problems=$((problems + 1))

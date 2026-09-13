@@ -124,8 +124,16 @@ interrupted carries an **`interrupted · ran again`** chip and `attempts=2`, and
 reports how many times it was interrupted. That chip is durable: it is read from the
 activity's own attempt numbers, so it is still there tomorrow.
 
-Finish the act by deciding the promotion — approving it, or declining it to show that a
-decline is a decision too, moving nothing and leaving no orphan.
+Finish the act by deciding the promotion — **decline it**, and say why that is not a
+throwaway: a decline moves nothing, which keeps the question open. Approving promotes the
+best candidate, and then the *next* investigation honestly concludes that nothing beats
+production and never reaches a gate at all. (This is not hypothetical: a rehearsal that
+approved every pass walked production from v7 to v19 and then could not find a gate
+anywhere.) Keep approving for Act 1 if you want to show a promotion landing; decline in
+Act 2 so Act 3 still has something to propose.
+
+If you want the incumbent where you left it, `DEMO_INCUMBENT=7 ./scripts/demo-reset.sh`
+pins production back to v7.
 
 ---
 
@@ -175,12 +183,14 @@ approve/decline decide the promotion.
 ## Between runs
 
 ```bash
-./scripts/demo-reset.sh
+DEMO_INCUMBENT=7 ./scripts/demo-reset.sh      # optional: pin the incumbent
 ```
 
 It terminates anything still pending, archives staging versions whose artifact is gone
 (they can never be promoted, and a run that evaluates one wastes a step finding out),
-restores `AGENT_FALLBACK=auto`, and prints the production version plus the candidates a
+leaves alone any version registered in the last three minutes — MLflow creates versions
+asynchronously, so a fresh one can look artifact-less — restores `AGENT_FALLBACK=auto`,
+optionally pins the incumbent, and prints the production version plus the candidates a
 run is likely to choose between. Run it before every rehearsal, not just before the real
 thing: the demo's own state is the easiest thing to leave broken.
 

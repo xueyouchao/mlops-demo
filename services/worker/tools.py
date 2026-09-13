@@ -327,12 +327,22 @@ def train_candidate(payload: dict) -> dict:
     client = _client()
     existing = _version_already_trained(client, params, data_hash)
     if existing:
-        metrics = _run_metrics(client, client.get_model_version(MODEL_NAME, existing).run_id)
-        return _ok(
-            f"v{existing} already exists for exactly these hyperparameters and this data — "
-            f"reused, no new version registered · accuracy {_fmt(metrics.get('accuracy'))}",
-            version=existing, stage="Staging", resumed=True, metrics=metrics, params=params,
-        )
+        # A version *row* is not a trained model. A kill during an earlier training
+        # can leave the row in the registry with no artifact — seven of them in one
+        # rehearsal — and handing that back as "reused" is how a run spends its
+        # steps evaluating nothing and then concludes that production cannot be
+        # beaten. Reuse only a version that has something to load. Otherwise train
+        # again: the run id is fixed by the hyperparameters and the data, so
+        # re-logging the model repairs the *same* run instead of creating a second
+        # one, and an interrupted training heals itself on the next attempt.
+        problem = artifact_problem(MLFLOW_TRACKING_URI, MODEL_NAME, existing)
+        if not problem:
+            metrics = _run_metrics(client, client.get_model_version(MODEL_NAME, existing).run_id)
+            return _ok(
+                f"v{existing} already exists for exactly these hyperparameters and this data — "
+                f"reused, no new version registered · accuracy {_fmt(metrics.get('accuracy'))}",
+                version=existing, stage="Staging", resumed=True, metrics=metrics, params=params,
+            )
 
     result = train_and_register({
         "model_name": MODEL_NAME,
