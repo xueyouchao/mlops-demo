@@ -13,6 +13,14 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from activities import brain_decide, promote_stage, rollback_stage, train_and_register
+from tools import (
+    conclude,
+    evaluate_version,
+    propose_promotion,
+    read_registry,
+    read_run_metrics,
+    train_candidate,
+)
 from workflows import PromotionWorkflow, RollbackWorkflow, TrainingWorkflow
 
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "temporal")
@@ -31,7 +39,12 @@ async def main() -> None:
         client,
         task_queue="ml-lifecycle",
         workflows=[PromotionWorkflow, RollbackWorkflow, TrainingWorkflow],
-        activities=[promote_stage, rollback_stage, train_and_register, brain_decide],
+        activities=[
+            promote_stage, rollback_stage, train_and_register, brain_decide,
+            # the agent's six tools — every tool is an activity (T01)
+            read_registry, read_run_metrics, evaluate_version,
+            train_candidate, propose_promotion, conclude,
+        ],
         activity_executor=ThreadPoolExecutor(max_workers=4),
     )
     print("mlops-demo worker connected, starting...", flush=True)

@@ -12,6 +12,7 @@ COPY services/worker/main.py /workspace/main.py
 COPY services/worker/workflows.py /workspace/workflows.py
 COPY services/worker/activities.py /workspace/activities.py
 COPY services/worker/brain.py /workspace/brain.py
+COPY services/worker/tools.py /workspace/tools.py
 
 ENV PYTHONPATH="/workspace"
 CMD ["python", "main.py"]

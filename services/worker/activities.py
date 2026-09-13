@@ -1,9 +1,10 @@
-"""Temporal activities — the only place external I/O happens.
+"""Temporal activities — where external I/O happens.
 
 Activities wrap MLflow registry updates, artifact loads, and Sentry capture.
 Keeping side effects here (rather than in the workflow) preserves workflow
 determinism: Temporal can safely replay the workflow because only activities
-touch the outside world.
+touch the outside world. The agent's brain (`brain.py`) and its six tools
+(`tools.py`) are activities for the same reason.
 """
 from __future__ import annotations
 

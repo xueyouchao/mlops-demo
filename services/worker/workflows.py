@@ -20,6 +20,15 @@ class PromotionWfInput:
     version_id: str
     model_name: str
     requested_by: str
+    # A proposal carries a *pointer*, not a duplicate of the reasoning: who asked
+    # (the agent's run, when it is one), one line of why, and the comparison the
+    # operator needs on the approval card. All optional, because a
+    # human-initiated promotion from the console sends none of them — and the
+    # full transcript stays one click away in the agent run's own history.
+    agent_run_id: str = ""
+    rationale: str = ""
+    candidate_metrics: dict | None = None
+    incumbent_metrics: dict | None = None
 
 
 @workflow.defn
@@ -47,7 +56,16 @@ class PromotionWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
             start_to_close_timeout=timedelta(seconds=30),
         )
-        return {"approved": True, "approved_by": self._approved_by, "version_id": inp.version_id}
+        return {
+            "approved": True,
+            "approved_by": self._approved_by,
+            "version_id": inp.version_id,
+            # Echoed back so the asker — the agent run waiting on this gate —
+            # records the real outcome rather than trusting the HTTP response
+            # that only acknowledged the click.
+            "agent_run_id": inp.agent_run_id,
+            "rationale": inp.rationale,
+        }
 
     @workflow.signal
     async def approval_signal(self, decision: dict) -> None:
