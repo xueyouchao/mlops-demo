@@ -30,3 +30,7 @@ Settle:
 - **Name the step unit** (see [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md)), and decide whether the transcript needs a Continue-As-New bound rather than relying on the demo staying short.
 - **Narrate it correctly**: "the run resumes where it was and the interrupted activity runs again" — never "nothing runs twice".
 
+## Partly settled by the loop contract
+
+[Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) settled the **step cap and its unit** — the cap counts brain calls and sits at 8, activity retries do not consume it, and a malformed decision does (so a confused brain self-terminates). It also settled the **three endings** (`conclude`, `budget_exhausted`, hard failure) as typed terminal entries. Do not re-decide those here. What remains on this ticket: the wall-clock ceiling, per-tool retry policies, what must survive which restarts, the scripted-fallback selection, and where run state is surfaced.
+

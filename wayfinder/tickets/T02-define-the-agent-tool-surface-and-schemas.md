@@ -27,3 +27,5 @@ Also settle:
 - **What the tools may read but never write** — the boundary is already fixed by the autonomy decision in the map's Notes.
 
 Feeds [Decide the proposal handoff into the approval gate](T05-decide-the-proposal-handoff-into-the-approval-gate.md).
+
+Constrained by [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md): exactly **one** tool call per decision (flat ReAct), `conclude` is the terminal tool, and the workflow validates the tool name against this allow-list (the activity only parses).

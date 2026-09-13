@@ -31,6 +31,7 @@ Pinned by the human during charting: **no** architecture write-up or ADR, **no**
 
 <!-- one line per closed ticket: enough to judge relevance, then zoom the link for detail -->
 
+- [Lock the agent loop contract](tickets/T01-lock-the-agent-loop-contract.md) — flat ReAct (one brain call → one tool → one observation per turn); a step is one brain call, cap 8, retries free; the brain is stateless and the transcript is the memory, recording the rationale but never the raw thinking; bad output becomes an observation that burns a step; three endings, and "no better candidate" is a legitimate result rather than an error
 - [Research how production durable-agent frameworks structure their loops](tickets/T09-research-durable-agent-loop-patterns.md) — our shape *is* Temporal's shipped pattern (loop in the workflow, model call as an activity, transcript in workflow state); Temporal ships no step bound, so ours is ours alone to define; and the demo carries an at-least-once hole — a retried activity restarts from the top with its failed attempt unrolled-back, so a kill during training risks training twice
 
 ## Not yet specified
