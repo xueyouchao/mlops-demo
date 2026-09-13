@@ -73,10 +73,15 @@ fixed = 0
 for v in c.search_model_versions(f"name='{name}'"):
     if v.current_stage != "Staging":
         continue
-    try:
-        present = bool(c.list_artifacts(v.run_id, "model"))
-    except Exception:
-        present = False
+    # Use the product's own rule. This script has been wrong twice with a rule of
+    # its own — once reading `source` as a filesystem path, once disagreeing with
+    # `artifact_problem` about seven perfectly servable versions — so it asks the
+    # thing that actually serves models instead of inventing a second opinion.
+    import os
+    from ml_platform.registry_health import artifact_problem
+    problem = artifact_problem(os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
+                               name, str(v.version))
+    present = not problem
     # MLflow creates model versions asynchronously ("waiting up to 300 seconds for
     # model version to finish creation"), so a version registered seconds ago can
     # look artifact-less and get archived by mistake. Never judge a fresh one.
