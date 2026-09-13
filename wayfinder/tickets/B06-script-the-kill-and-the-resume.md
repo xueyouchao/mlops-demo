@@ -30,3 +30,47 @@ Confirmed in the same run: `docker kill` leaves the worker down (see above), and
 **And the kill can land in a window that used to hang, which the script must now respect.** A kill 8 seconds after an activity was *scheduled* — before any worker acknowledged it — left that run stalled indefinitely: no timeout applies to a task that never started, so nothing re-delivered it. That is fixed in the loop (every agent activity now carries an explicit `schedule_to_start_timeout`, see the third amendment in T06), so the worst case is now a visible retry rather than a run that never moves. It is still worth knowing *why* the script should kill where it says to: the safe window is either with no activity pending at all, or with one genuinely in flight.
 
 **And the cost of a mid-activity kill is measurable, so the script should choose its moment with the number in hand.** Killing the worker while a *brain call* was in flight (a 3-minute `start_to_close`) cost the run **183 seconds of wall-clock for 148 seconds of work** — the audience watches a frozen run for three minutes, which is a long silence on stage. Killing while a *read* is in flight costs up to 60 s, a training up to 5 minutes. The panel does its part — the frozen step says *"no worker is answering"* and keeps its clock running — but the script should aim at the cheapest window it can hit deliberately: at the approval gate, where the run is waiting on a person rather than on an activity, or immediately after a step completes. That is a scripting decision this ticket owns, and the numbers above are why it matters.
+
+## Outcome
+
+**Written and pushed:** `docs/demo-script.md` (three acts, the exact narration, the
+kill point with the numbers behind it, the reset, the claim worded as the sources
+support it), `scripts/demo-reset.sh`, a README pointer, and the session fix in the
+rehearsal harness.
+
+**Verified:** the reset is idempotent — two consecutive runs, both exit 0. It clears
+promotions parked at the gate, restores `AGENT_FALLBACK=auto`, and reports what a run
+will weigh. `DEMO_INCUMBENT=N` pins the incumbent through `POST /api/models/rollback`
+(`{"ok": true, "rolled_back_to": "6"}`).
+
+**Two product bugs found while building this, both fixed:**
+
+1. `train_candidate` reused a version *row* without checking its artifact. A kill
+   during training can leave a row with nothing to load — seven in one rehearsal,
+   plus the original v2 — and handing that back as "reused" spends a run's steps on a
+   version it cannot evaluate. It now checks `artifact_problem` and trains again when
+   the artifact is missing; because the run id is fixed by the hyperparameters and the
+   data, re-logging repairs the same run. Proven by forcing the lookup to return
+   artifact-less v2: the tool refused it and registered v36 with the artifact present.
+2. The reset's own artifact rule disagreed with the product's and archived **32
+   servable versions**. It now calls `artifact_problem`. This is the second time this
+   file invented a rule it should not have owned.
+
+**Not done — the done-when is not met, so this ticket stays open.** The demo has not
+run end to end twice. The blocker is a design fact, not a defect: the agent proposes
+only when a candidate genuinely beats the incumbent, and against this registry it
+honestly concludes "nothing beats production" instead — repeatedly, with the incumbent
+pinned to v7, to v6, and with fresh candidates trained each time. That is the correct
+behaviour (T01), and it is the most convincing thing in the demo, but it means the
+gate is **not reachable on demand**, so Acts 2 and 3 have nothing to stand on when a
+presenter needs them.
+
+**What remains, in order:**
+
+1. Make the gate reachable: pin the incumbent to a version that a fresh candidate can
+   genuinely beat (a deliberately weak configuration), or script the two gate acts as a
+   recorded run rather than a live one.
+2. Rewrite the script's opening so "no better candidate" is a first-class act rather
+   than a fallback branch — it is what the agent actually does here.
+3. Then the two-pass rehearsal, with the harness re-logging on 401 (the 15-minute TTL
+   killed one rehearsal) and `python3 -u` (buffering hid another).
