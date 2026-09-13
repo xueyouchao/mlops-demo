@@ -2,8 +2,8 @@
 id: T08
 title: Choose the brain model & structured tool-call output
 labels: [wayfinder:task]
-status: open
-assignee: ""
+status: closed
+assignee: "dsh session"
 blocked-by: []
 ---
 
@@ -31,3 +31,29 @@ Also decide: which model is the *default* for the demo, whether it is configurab
 - **Validate the tool call whatever the provider claims.** Vendors headline "no need to validate" and then document exceptions on the same page; OpenAI's strict mode can silently degrade to best-effort function calling. So the brain activity must validate the returned call and distinguish **unparseable** from **unknown tool** from **nonsensical arguments**, returning each as an observation the model can react to rather than as an exception. (Feeding tool errors back as observations *is* the norm — OpenAI's own default error function does precisely that.)
 - **If the prompt-for-JSON fallback is needed, reuse the known four-part shape** rather than inventing one: a JSON blob in the prompt with a sentinel, a tolerant parse, a typed parse error, and a bounded repair call carrying the error text. It is legacy in LangChain and absent from the OpenAI Agents SDK, so there is nothing to copy wholesale — but the shape is documented.
 - **Give the scripted-policy fallback the same output contract** as the model activity, so two producers feed one parsing path.
+
+## Resolution
+
+Measured against the host's ollama **0.32.15** at `localhost:11434` on **2026-09-13 04:52 UTC**. These numbers expire — re-measure if the daemon or the model tags move.
+
+**1. Native `tools` works, on every candidate.** All eight `:cloud` models returned a well-formed `tool_calls` for a supplied tool schema, with the correct tool name, in 0.8–3.1 s (minimax-m3 0.8, kimi-k2.7-code 0.9, deepseek-v4-pro 1.0, minimax-m2.7 1.6, glm-5.2 1.9, glm-5.1 2.0, deepseek-v4-flash 2.8, kimi-k2.6 3.1). The research's unverified claim resolves in the affirmative: **native tool-calling is the primary path**, and the prompt-for-JSON fallback is not needed for the models on this host.
+
+**2. `format` (structured outputs) does not constrain output — measured, not assumed.** Every model *accepts* a `format` schema and answers HTTP 200, but the schema is not enforced: with a generous budget, deepseek-v4-flash returned `{"tool": "search_models"}` (missing a required key), glm-5.2 and minimax-m3 returned markdown-fenced JSON, and only kimi-k2.7-code happened to conform. There is no error to detect — the request simply is not honoured, which corroborates ollama's documented Cloud limitation and settles it here: **do not build the output contract on `format`.** Use `tools` and validate the call regardless of provider.
+
+**3. The trap at realistic size: a tight generation budget silently destroys the tool call.** These are reasoning models and the tool call is emitted *after* the thinking. At `num_predict=512` against a ~700-token step-6 prompt, glm-5.2 and minimax-m3 returned `done_reason=length`, `eval_count=512`, ~1,900–2,000 characters of thinking — and **empty content with no tool call**. That first read as three models being incompetent (0/5); raising the budget to 4096 on the identical prompt produced clean calls from both. deepseek-v4-flash is the least verbose reasoner (~730 characters of thinking versus 1,900–3,500), which is why it tolerated the tight budget and looked strong in that invalid comparison.
+  Consequence for the build: set a **generous `num_predict` (4096 measured)**, and have the brain activity treat `done_reason == "length"` as a typed failure — `truncated` — rather than returning an empty decision. That feeds straight into [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) decision 4: a bad decision is an observation that burns a step, and this is one of its real cases.
+
+**4. Reliability and latency at an adequate budget** — realistic ~700-token step-6 prompt, 10 runs each, `num_predict=4096`:
+
+| model | valid calls | latency p50 | latency max | choices |
+| --- | --- | --- | --- | --- |
+| **deepseek-v4-flash:cloud** | **10/10** | **2.9 s** | 3.1 s | propose_promotion ×9, train_candidate ×1 |
+| glm-5.2:cloud | 10/10 | 8.9 s | 14.5 s | train_candidate ×5, propose_promotion ×3, conclude ×2 |
+| minimax-m3:cloud | 10/10 | 14.6 s | 25.2 s | conclude ×4, propose_promotion ×4, train_candidate ×2 |
+| kimi-k2.7-code:cloud | 8/10 | 9.8 s | 28.2 s | propose_promotion ×7, conclude ×1 |
+
+Every returned call named an allow-listed tool with parseable arguments — no unknown tools and no malformed arguments across the pass.
+
+**Decision — the default brain is `deepseek-v4-flash:cloud`.** It was 100 % valid, **3× faster than the next candidate** (2.9 s p50 and 3.1 s worst case, versus 8.9 s and 14.5–28.2 s), and the most decisive: it recognised that version 6 had beaten version 5 on the identical slice and proposed accordingly. Latency decides a live demo — at ~3 s per step an 8-step run spends ~25 s in the model, leaving room for the tool calls. The model name is configurable by env; the other three stay valid fallbacks, and the scripted-policy fallback shares this output contract so every producer feeds one parsing path.
+
+**Not verified here:** whether these models hold up across the *full* 8-step transcript (this measured a step-6 prompt), and whether `:cloud` availability or latency drifts with daemon load. Both are worth a glance on the loop's first end-to-end run.

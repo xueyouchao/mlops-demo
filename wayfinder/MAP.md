@@ -31,6 +31,7 @@ Pinned by the human during charting: **no** architecture write-up or ADR, **no**
 
 <!-- one line per closed ticket: enough to judge relevance, then zoom the link for detail -->
 
+- [Choose the brain model & structured tool-call output](tickets/T08-choose-the-brain-model-and-tool-call-output.md) — default brain is `deepseek-v4-flash:cloud` (10/10 valid tool calls, 2.9 s p50, 3× faster than the next); native `tools` works on all eight candidates while `format` is accepted but never enforced; and a tight `num_predict` silently eats the tool call, so the budget must be generous and `done_reason=length` treated as a typed failure
 - [Lock the agent loop contract](tickets/T01-lock-the-agent-loop-contract.md) — flat ReAct (one step = one brain call → one tool → one observation); cap 8, retries free; the brain is stateless and the transcript is the memory, recording the rationale but never the raw thinking; bad output becomes an observation that burns a step; three endings, and "no better candidate" is a legitimate result rather than an error
 - [Research how production durable-agent frameworks structure their loops](tickets/T09-research-durable-agent-loop-patterns.md) — our shape *is* Temporal's shipped pattern (loop in the workflow, model call as an activity, transcript in workflow state); Temporal ships no step bound, so ours is ours alone to define; and the demo carries an at-least-once hole — a retried activity restarts from the top with its failed attempt unrolled-back, so a kill during training risks training twice
 
