@@ -3,7 +3,7 @@ id: T07
 title: Prototype the console's agent panel
 labels: [wayfinder:prototype]
 status: open
-assignee: ""
+assignee: "dsh session"
 blocked-by: [T03, T04]
 ---
 
