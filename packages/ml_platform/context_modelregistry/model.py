@@ -55,6 +55,47 @@ class Model:
         self._versions[version_id] = v
         return v
 
+    def sync_from_registry(self, records: list[tuple[str, str, str, Stage]]) -> list[str]:
+        """Adopt versions the read model does not know about yet.
+
+        The aggregates here are an in-memory read model, while MLflow is the
+        registry of record, so the model has to be re-built from MLflow after a
+        restart. Hydration is deliberately *additive*: a version already held in
+        memory is never rewritten, so the running process's own promotions and
+        canary decisions stay authoritative until it restarts.
+
+        If more than one version is live in the registry (MLflow permits that
+        unless promotions archive their predecessor), the *highest* one wins —
+        it is the most recent promotion, and it is what an operator expects to
+        be serving.
+
+        `records` is `(version_id, run_id, artifact_uri, stage)`, oldest first.
+        Returns the ids that were added.
+        """
+        added: list[str] = []
+        live: str | None = None
+
+        for version_id, run_id, artifact_uri, stage in records:
+            if stage is Stage.PRODUCTION:
+                live = version_id
+            if version_id in self._versions:
+                continue
+            self._versions[version_id] = ModelVersion(
+                version_id=version_id,
+                model_name=self.name,
+                run_id=run_id,
+                artifact_uri=artifact_uri,
+                stage=stage,
+            )
+            added.append(version_id)
+
+        # Only adopt the registry's live version if we do not already point at
+        # one, so an in-session promotion is not overwritten by a later refresh.
+        if self._production_pointer is None and live is not None:
+            self._production_pointer = live
+
+        return added
+
     def promote_to_production(self, version_id: str, approved_by: str = "system") -> ModelVersion:
         v = self._versions[version_id]
         self._versions[version_id] = _with_stage(v, Stage.PRODUCTION)

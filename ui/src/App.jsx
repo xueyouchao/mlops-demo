@@ -41,6 +41,16 @@ const api = (path, opts = {}) =>
 
 const shortLabel = (t) => t.short || t.title;
 
+// FastAPI reports errors as {"detail": ...}: a sentence for our own messages, or
+// a list for pydantic validation. Surface the sentence, not the JSON dump.
+const errorText = (body, status) => {
+  const d = body?.detail;
+  if (typeof d === "string") return d;
+  if (Array.isArray(d))
+    return d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ");
+  return body ? JSON.stringify(body) : `request failed (HTTP ${status})`;
+};
+
 function useApi() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -74,10 +84,11 @@ function useApi() {
       headers: { "Content-Type": "application/json" },
       ...opts,
     });
-    if (!r.ok) setError(await r.text());
+    const body = await r.json().catch(() => null);
+    if (!r.ok) setError(errorText(body, r.status));
     else setError(null);
     refresh();
-    return r.json();
+    return body;
   };
   return { data, error, me, refresh, call };
 }
@@ -106,9 +117,154 @@ function Login() {
   );
 }
 
-function InlineConsole({ data, error, call }) {
+function TrainPanel({ refresh }) {
+  const [params, setParams] = useState({ n_estimators: 120, max_depth: 3, learning_rate: 0.08 });
+  const [job, setJob] = useState(null); // { workflow_id, status, result, error }
+  const jobId = job?.workflow_id;
+  const jobStatus = job?.status;
+
+  const start = async () => {
+    setJob({ status: "STARTING" });
+    const r = await api("/api/models/train", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        n_estimators: Number(params.n_estimators),
+        max_depth: Number(params.max_depth),
+        learning_rate: Number(params.learning_rate),
+      }),
+    });
+    const body = await r.json().catch(() => null);
+    if (!r.ok) {
+      setJob({ status: "ERROR", error: errorText(body, r.status) });
+      return;
+    }
+    setJob({ workflow_id: body.workflow_id, status: "RUNNING" });
+  };
+
+  // Poll the durable workflow until it settles, then refresh the console state.
+  useEffect(() => {
+    if (!jobId || jobStatus !== "RUNNING") return;
+    const timer = setInterval(async () => {
+      const r = await api(`/api/models/train/${jobId}`);
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        setJob((j) => ({ ...j, status: "ERROR", error: errorText(body, r.status) }));
+        return;
+      }
+      if (body.status !== "RUNNING") {
+        setJob((j) => ({ ...j, status: body.status, result: body.result, error: body.error }));
+        refresh();
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [jobId, jobStatus]);
+
+  const set = (k) => (e) => setParams({ ...params, [k]: e.target.value });
+  const busy = jobStatus === "RUNNING" || jobStatus === "STARTING";
+
+  return (
+    <section>
+      <h2>Train a candidate</h2>
+      <p className="hint">
+        Runs a durable TrainingWorkflow on the worker and registers a <em>new</em> version
+        in Staging. An existing version is never modified, and nothing serves traffic
+        until you promote it below.
+      </p>
+      <div className="row">
+        <label>
+          n_estimators
+          <input value={params.n_estimators} onChange={set("n_estimators")} />
+        </label>
+        <label>
+          max_depth
+          <input value={params.max_depth} onChange={set("max_depth")} />
+        </label>
+        <label>
+          learning_rate
+          <input value={params.learning_rate} onChange={set("learning_rate")} />
+        </label>
+        <button onClick={start} disabled={busy}>
+          {busy ? "Training…" : "Train & register"}
+        </button>
+      </div>
+      {jobId && (
+        <p className="status">
+          workflow <b>{jobId}</b> — {job?.status}
+        </p>
+      )}
+      {job?.result && <pre>{JSON.stringify(job.result, null, 2)}</pre>}
+      {job?.error && <div className="err">{job.error}</div>}
+    </section>
+  );
+}
+
+function PredictPanel() {
+  const [featText, setFeatText] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const useSample = () =>
+    api("/v1/sample")
+      .then((r) => r.json())
+      .then((d) => d.features && setFeatText(d.features.join(", ")));
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const features = featText.split(/[,\s]+/).filter(Boolean).map(Number);
+      const r = await api("/v1/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(features),
+      });
+      setResult({ ok: r.ok, body: await r.json() });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section>
+      <h2>Predict (live serving)</h2>
+      <p className="hint">
+        Goes through the same origin to the serving router and loads the real artifact
+        for the routed version — so the version it reports is the one that answered.
+      </p>
+      <textarea
+        rows={3}
+        value={featText}
+        onChange={(e) => setFeatText(e.target.value)}
+        placeholder="30 comma-separated feature values"
+      />
+      <div className="row">
+        <button className="ghost" onClick={useSample}>
+          Use a sample row
+        </button>
+        <button onClick={run} disabled={busy || !featText.trim()}>
+          {busy ? "Scoring…" : "Predict"}
+        </button>
+      </div>
+      {result && (
+        <pre className={result.ok ? undefined : "err"}>{JSON.stringify(result.body, null, 2)}</pre>
+      )}
+    </section>
+  );
+}
+
+function InlineConsole({ data, error, call, refresh }) {
   const [version, setVersion] = useState("1");
+  // The human-approval gate is keyed by the workflow id that promote returns:
+  // the approve signal has to go to *that* workflow, not a placeholder.
+  const [pending, setPending] = useState(null); // { version, workflow_id }
   const weights = data?.routing?.weights || {};
+
+  const startPromotion = async () => {
+    if (!version) return;
+    const res = await call(`/api/models/${version}/promote`);
+    if (res?.workflow_id) setPending({ version, workflow_id: res.workflow_id });
+  };
+
   return (
     <div className="ops">
       {error && <div className="err">{error}</div>}
@@ -142,10 +298,23 @@ function InlineConsole({ data, error, call }) {
           canary % for version&nbsp;
           <input value={version} onChange={(e) => setVersion(e.target.value)} style={{ width: 40 }} />
         </label>
-        <button onClick={() => version && call(`/api/models/${version}/promote`)}>Promote (gate)</button>
-        <button onClick={() => version && call(`/api/models/${version}/approve?workflow_id=wf-demo`)}>Approve</button>
+        <button onClick={startPromotion}>Promote (gate)</button>
+        <button
+          disabled={!pending}
+          title={pending ? `signal ${pending.workflow_id}` : "run Promote first"}
+          onClick={() =>
+            pending &&
+            call(`/api/models/${pending.version}/approve?workflow_id=${encodeURIComponent(pending.workflow_id)}`)
+          }
+        >
+          Approve
+        </button>
         <button onClick={() => call(`/api/models/rollback?to_version_id=${version}`)}>Rollback</button>
       </section>
+
+      <TrainPanel refresh={refresh} />
+
+      <PredictPanel />
 
       <section>
         <h2>Audit / Lineage (events)</h2>
@@ -156,12 +325,12 @@ function InlineConsole({ data, error, call }) {
 }
 
 function Shell({ me, onLogout }) {
-  const { data, error, call } = useApi();
+  const { data, error, call, refresh } = useApi();
   const [tab, setTab] = useState("ops");
   const active = TABS[tab];
 
   const renderPane = () => {
-    if (active.kind === "inline") return <InlineConsole data={data} error={error} call={call} />;
+    if (active.kind === "inline") return <InlineConsole data={data} error={error} call={call} refresh={refresh} />;
     if (active.kind === "link")
       return (
         <div className="linkout">

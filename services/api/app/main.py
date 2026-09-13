@@ -33,7 +33,11 @@ app.include_router(security.router)
 def _init_lifecycle():
     from .state import state
     from .temporal_port import TemporalLifecyclePort
+    from .registry_sync import sync_from_registry
     state.ensure_lifecycle(TemporalLifecyclePort())
+    # The aggregates are in-memory only, so re-build the read model from MLflow
+    # (the registry of record) or every restart starts with an empty console.
+    sync_from_registry()
 
 
 @app.get("/healthz")

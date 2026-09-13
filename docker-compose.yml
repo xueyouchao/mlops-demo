@@ -38,10 +38,14 @@ services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.14.3
     container_name: mlops-demo-mlflow
-    command: 'mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db
-      --default-artifact-root /mlflow-artifacts
-
-      '
+    # Artifacts must live INSIDE the persisted volume. They previously went to
+    # /mlflow-artifacts, a path in the container's writable layer, so every
+    # container recreate silently deleted every model artifact while mlflow.db
+    # (which does live in the volume) survived — leaving registry rows that
+    # point at files that no longer exist.
+    # --serve-artifacts additionally lets other services download artifacts over
+    # HTTP, which is what makes real inference in `serving` possible at all.
+    command: 'mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --artifacts-destination /mlflow/artifacts --serve-artifacts'
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
     ports:
@@ -90,7 +94,11 @@ services:
     environment:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_CORS_ORIGINS: http://localhost:8082,http://localhost:8233
-      TEMPORAL_UI_PUBLIC_PATH: /temporal/
+      # No trailing slash: a trailing slash makes the UI emit doubled asset
+      # URLs (/temporal//_app/...), which any proxy that normalises duplicate
+      # slashes (Traefik) rewrites to a path that serves the SPA shell instead
+      # of the JS module -> blank Temporal UI.
+      TEMPORAL_UI_PUBLIC_PATH: /temporal
     depends_on:
       temporal:
         condition: service_healthy

@@ -16,8 +16,8 @@ train → register (MLflow) → promote (Temporal, human-approval gate)
 ```
 [ui]       single-origin gateway + harness shell (React/Vite)   ── :8082
 [api]      FastAPI: auth (JWT HttpOnly) + lifecycle facade       ── :8000
-[serving]  FastAPI: canary/blue-green router + Sentry            ── :8001
-[worker]   Temporal worker: activities, promote/rollback wf
+[serving]  FastAPI: canary/blue-green router + real model inference  ── :8001
+[worker]   Temporal worker: activities, train/promote/rollback wf
 [mlflow]   model registry  (train → register → stage)
 [temporal] durable orchestration (human-approval gate)
 [postgres] shared state (users + registry/metadata)
@@ -32,7 +32,7 @@ frame/cookie policies just work:
 
 | Tab (sidebar) | Served how |
 |---|---|
-| **Ops Console** | inline React (versions, stages, routing, promote/approve/rollback, audit) |
+| **Ops Console** | inline React (versions, stages, routing, **train/retrain**, **predict**, promote/approve/rollback, audit) |
 | **Diagrams** (architecture / workflow / lifecycle / sequence / dataflow) | static `diagrams/*.html` (Archify, `<meta animation="trace">`) |
 | **Temporal UI** | reverse-proxied `/temporal/` (Temporal `publicPath=/temporal/`) |
 | **MLflow UI** | reverse-proxied `/mlflow/` (prefix-strip; hash-routed app) |
@@ -69,12 +69,27 @@ This trains a GradientBoosting classifier on Breast Cancer Wisconsin, logs the
 run + lineage (data hash, dataset, params) to MLflow, registers a version, and
 auto-stages it (awaiting the human production gate).
 
+**Or retrain from the console:** the **Ops Console** has a *Train a candidate*
+panel — set `n_estimators` / `max_depth` / `learning_rate` and click
+**Train & register**. That runs the same work as a durable `TrainingWorkflow` on
+the worker (no `tools` profile, no shell), and the new version lands in
+**Staging**. Training never edits an existing version — `ModelVersion` is
+immutable by design, so a retrain is always a new version number.
+
 **Flow to demo:**
 1. Sign in to the console → you'll see the version staged as **Staging**.
 2. Click **Promote** → the Temporal workflow starts and *waits* for approval.
 3. Click **Approve** → the version transitions to **Production** (identity recorded).
 4. Use the **Rollback** button to blue-green flip back to a prior version.
 5. Call **serving** (`POST /v1/predict`) to see canary weighting route to versions.
+6. Retrain with different hyperparameters, promote the new version, and predict
+   again — the served version and its output change, because serving loads the
+   real artifact for the routed version.
+
+**Calling serving:** `POST /v1/predict` takes a JSON array of **exactly 30**
+feature values (the Breast Cancer Wisconsin width). `GET /v1/sample` returns one
+real row to use, which the console's Predict panel has a button for. Predictions
+are the model's real output: `{"model_version", "predictions", "probability_malignant", "routing"}`.
 
 ---
 
@@ -143,7 +158,8 @@ confirmed green:
 | Promote (starts durable gate) | `POST /api/models/1/promote` | returns `workflow_id` |
 | Approve (Temporal signal w/ identity) | `POST /api/models/1/approve` | stage → **Production** |
 | MLflow registry | (Temporal activity) | `v1: stage=Production` ✅ |
-| Serving predict | `POST /v1/predict` | routes on `{"1":100}` |
+| Serving predict | `POST /v1/predict` (30 features) | routes on `{"1":100}`, real artifact |
+| Retrain from console | `POST /api/models/train` | TrainingWorkflow → new version in Staging |
 | Rollback (blue-green) | `POST /api/models/rollback` | 200 → v1 |
 | Audit trail | `GET /api/models/events` | register/promote/approve/rollback events |
 

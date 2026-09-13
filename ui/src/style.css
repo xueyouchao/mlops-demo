@@ -82,3 +82,17 @@ button { font: inherit; }
 .ops input { padding: 5px; border: 1px solid #999; border-radius: 4px; }
 .ops pre { background: #0e1116; color: #d3e0f0; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 260px; }
 .err { background: #fdd; border: 1px solid #c66; color: #800; padding: 8px 12px; border-radius: 6px; margin: 10px 0; }
+
+/* ---------- Train / predict panels ---------- */
+.ops .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 12px 0 4px; }
+.ops .row label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: #444; }
+.ops .row input { width: 92px; }
+.ops textarea {
+  width: 100%; padding: 8px; border: 1px solid #999; border-radius: 6px; resize: vertical;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.ops .status { font-size: 12.5px; margin: 8px 0 0; }
+.ops .status b { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.ops button[disabled] { opacity: 0.5; cursor: not-allowed; }
+.ops button.ghost { background: #fff; border-color: #b9c0c9; color: #333; }
+.ops h2 + .hint { margin-top: -6px; }

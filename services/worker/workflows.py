@@ -56,6 +56,43 @@ class PromotionWorkflow:
             self._approved_by = decision.get("by")
 
 
+@dataclass
+class TrainingWfInput:
+    model_name: str
+    n_estimators: int
+    max_depth: int
+    learning_rate: float
+    requested_by: str
+
+
+@workflow.defn
+class TrainingWorkflow:
+    """Train + register a candidate version from operator-supplied knobs.
+
+    No human gate here on purpose: training only ever lands in Staging, and the
+    existing promote/approve gate still guards the step that matters — reaching
+    Production. The activity is referenced by string name for the same
+    determinism reason as promotion (it pulls in sklearn + mlflow).
+    """
+
+    @workflow.run
+    async def run(self, inp: TrainingWfInput) -> dict:
+        return await workflow.execute_activity(
+            "train_and_register",
+            {
+                "model_name": inp.model_name,
+                "n_estimators": inp.n_estimators,
+                "max_depth": inp.max_depth,
+                "learning_rate": inp.learning_rate,
+                "requested_by": inp.requested_by,
+            },
+            # Deliberately low: training is expensive and a bad hyperparameter
+            # set will fail identically on every attempt.
+            retry_policy=RetryPolicy(maximum_attempts=2),
+            start_to_close_timeout=timedelta(minutes=5),
+        )
+
+
 @workflow.defn
 class RollbackWorkflow:
     """Rollback to the previous registered version (blue-green flip)."""

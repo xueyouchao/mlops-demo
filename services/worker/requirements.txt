@@ -3,3 +3,8 @@ mlflow==2.14.3
 sentry-sdk==2.19.2
 pydantic==2.10.4
 numpy<2
+# Pinned explicitly: scikit-learn otherwise arrives transitively via mlflow and
+# resolves to a newer major than the trainer/serving images. A model pickled by
+# one version and unpickled by another warns or fails, so keep them identical.
+scikit-learn==1.5.2
+joblib==1.4.2
