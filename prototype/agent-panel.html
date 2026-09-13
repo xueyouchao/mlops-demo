@@ -311,6 +311,10 @@ const producerHtml = (s) => s.producer === "fallback"
 const esc = (t) => String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 
 /* ---------- shared strips (facts every variant must show) ---------- */
+function protoBar() {
+  return `<div class="statebar" style="margin:0 0 14px"><div class="hint" style="margin-bottom:6px">prototype control — fake run state</div>${stateButtons()}</div>`;
+}
+
 function headerStrip() {
   return `
     <div class="runhead">
@@ -398,6 +402,7 @@ function variantA() {
 
   return `
   <div class="ops">
+    ${protoBar()}
     <div class="proto-note"><b>PROTOTYPE A — Timeline.</b> One vertical spine. Judge it on whether the reasoning is legible at a glance from the back of a room.</div>
     <section>${headerStrip()}${stateNote()}${durableNote()}</section>
     <section><h2>The run</h2><ul class="tl">${steps}${notYet}</ul></section>
@@ -421,6 +426,7 @@ function variantB() {
 
   return `
   <div class="ops">
+    ${protoBar()}
     <div class="proto-note"><b>PROTOTYPE B — Scratchpad.</b> The panel as a <b>section of the existing Ops Console page</b>, not a new tab — so it sits between the real version table and the real audit log at real density.</div>
 
     <section>
@@ -473,6 +479,8 @@ function variantC() {
   const cur = S.steps.find((s) => s.n === selectedStep) || S.steps[S.steps.length - 1];
 
   return `
+  <div style="flex:1; display:flex; flex-direction:column; min-height:0">
+  <div style="padding:14px 16px 0">${protoBar()}</div>
   <div class="insp">
     <div class="insp-side">
       <div class="top">
@@ -512,6 +520,7 @@ function variantC() {
       ${approvalCard()}
       ${endingBlock()}
     </div>
+  </div>
   </div>`;
 }
 
@@ -551,8 +560,7 @@ function render() {
   document.getElementById("paneTitle").textContent = V.title;
   document.getElementById("paneGroup").textContent = V.group;
   document.getElementById("swLbl").innerHTML = `<b>${variant}</b> — ${V.name} <span class="k">· ${stateKey}</span>`;
-  const bar = `<div class="statebar" style="margin:0 0 14px"><div class="hint" style="margin-bottom:6px">prototype control — fake run state</div>${stateButtons()}</div>`;
-  document.getElementById("paneBody").innerHTML = bar + body;
+  document.getElementById("paneBody").innerHTML = body;
 }
 
 const order = ["A", "B", "C"];
