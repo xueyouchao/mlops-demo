@@ -20,3 +20,13 @@ Settle:
 - **The scripted fallback.** Decide how the brain activity selects it (ollama unreachable? explicit flag?) and what the transcript says so a viewer can tell the fallback ran instead of the model — the demo must not silently pretend.
 - **Where the operator sees run state** — running / awaiting-approval / concluded / failed — and how that maps onto the console's existing polling.
 
+## Prior evidence (from the research branch) — read before choosing the demo's kill point
+
+[Research how production durable-agent frameworks structure their loops](T09-research-durable-agent-loop-patterns.md) closed with findings on a throwaway branch — read with `git show research/durable-agent-loop-patterns:docs/research/durable-agent-loop-patterns.md` (§2, §3, §5). Its most important practical caveat lands squarely on this ticket:
+
+- **The demo has an at-least-once hole.** A worker death re-runs the *in-flight* activity from the top, and a failed attempt's effects are not rolled back (Temporal's own LangGraph integration states this outright). The workflow's position is durable; the tool's side effect is not. Killing during `train_and_register` therefore risks **training twice**. Decide explicitly: kill the worker while the loop is *between* steps (easiest, and honest if narrated), or give the training tool heartbeats and/or idempotency before claiming durability across it.
+- **Recovery latency is floored by `start_to_close_timeout`, not by worker restart speed.** The Server cannot detect a dead worker — Start-To-Close is what forces the retry. With `promote_stage` at 30 s, the run can look "stuck" for that long after the worker is already back. Choose the timeout knowing it is also the length of the demo's dead window.
+- **Set retry policies explicitly.** The default is infinite attempts with no non-retryable errors — wrong for a tool that shells out to a trainer, and already handled deliberately in `promote_stage`.
+- **Name the step unit** (see [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md)), and decide whether the transcript needs a Continue-As-New bound rather than relying on the demo staying short.
+- **Narrate it correctly**: "the run resumes where it was and the interrupted activity runs again" — never "nothing runs twice".
+
