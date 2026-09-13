@@ -14,3 +14,6 @@ mlflow/
 
 # archify visual-check scratch output
 *visual-check.*
+
+# build scratch (DOCKER_CONFIG/TMPDIR for compose builds)
+.tmp/
