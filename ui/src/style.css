@@ -96,3 +96,71 @@ button { font: inherit; }
 .ops button[disabled] { opacity: 0.5; cursor: not-allowed; }
 .ops button.ghost { background: #fff; border-color: #b9c0c9; color: #333; }
 .ops h2 + .hint { margin-top: -6px; }
+
+/* ---------- Agent panel: T07's timeline, in the console's own conventions ---------- */
+.agent .run-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.agent .goal-line { margin: 10px 0 2px; font-size: 14px; }
+.agent .clocks { display: flex; gap: 14px; font-size: 12.5px; color: #444; }
+.agent .clocks b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.agent .composer textarea[disabled] { background: #f2f4f7; color: #444; cursor: not-allowed; }
+
+.state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 7px; border-radius: 999px; border: 1px solid transparent; }
+.state-running { background: #e7f0ff; color: #1d4ed8; border-color: #c3d8ff; }
+.state-awaiting-approval { background: #fff4d6; color: #8a5a00; border-color: #f0d79a; }
+.state-concluded { background: #e3f6ec; color: #0a7a4a; border-color: #b7e3cd; }
+.state-failed, .state-terminated, .state-cancelled { background: #fdeaea; color: #a11; border-color: #f2c2c2; }
+
+.run-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.run-pill { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #d5dae1; border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12.5px; color: #14161a; }
+.run-pill:hover { border-color: #2563eb; }
+.run-pill.active { border-color: #2563eb; box-shadow: 0 0 0 2px #dbe6ff; }
+.run-pill code { font-size: 12px; color: #555; }
+.pill-meta { color: #667; }
+
+/* The approval gate — the one place the run stops and waits for a person. */
+.gate { border-left: 4px solid #e0a200; }
+.gate header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.gate .compare { margin: 10px 0; }
+.gate .compare th, .gate .compare td { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.gate .rationale { font-size: 13px; }
+
+.chip { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em; border-radius: 999px; padding: 2px 7px; border: 1px solid #ccc; background: #f4f6f8; color: #555; }
+.chip-model { background: #e7f0ff; border-color: #c3d8ff; color: #1d4ed8; }
+.chip-fallback { background: #fff0e2; border-color: #f0cfa8; color: #8a4b00; }
+.chip-break { background: #fdeaea; border-color: #f2c2c2; color: #a11; }
+.chip-wait { background: #fff4d6; border-color: #f0d79a; color: #8a5a00; }
+.chip-done { background: #e3f6ec; border-color: #b7e3cd; color: #0a7a4a; }
+
+/* The spine: one step = one unit, and the rail visibly breaks where the run did. */
+.spine { list-style: none; margin: 14px 0 0; padding: 0 0 0 22px; position: relative; }
+.spine::before { content: ""; position: absolute; left: 7px; top: 6px; bottom: 12px; width: 2px; background: #cfd6df; }
+.node { position: relative; padding-bottom: 16px; }
+.node::before { content: ""; position: absolute; left: -19px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #fff; border: 2px solid #9aa5b1; }
+.node.ok::before { border-color: #0a7; background: #0a7; }
+.node.bad::before { border-color: #c33; background: #c33; }
+.node.pending::before { border-color: #2563eb; animation: agent-pulse 1.2s ease-in-out infinite; }
+.node.frozen::before { border-color: #c33; animation: none; }
+.node.broken::before { box-shadow: 0 0 0 4px #fdeaea; }
+@keyframes agent-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.35); } }
+.node-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: #444; }
+.node-step { font-weight: 700; color: #14161a; }
+.node-tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.node-secs { color: #667; }
+.node-rationale { margin: 4px 0 2px; font-size: 13px; }
+.node-obs { margin: 2px 0 0; font-size: 13px; color: #24303c; background: #f7f9fb; border: 1px solid #e6eaef; border-radius: 6px; padding: 7px 9px; }
+.node-obs.deciding { color: #1d4ed8; background: #f2f7ff; border-color: #d6e4ff; }
+.node.frozen .node-obs.deciding { color: #a11; background: #fdf2f2; border-color: #f2c2c2; }
+.frozen-note { font-weight: 400; color: #a11; }
+
+.ending { border-radius: 8px; padding: 10px 12px; margin-top: 12px; border: 1px solid; }
+.ending b { display: block; font-size: 13px; }
+.ending p { margin: 4px 0 0; font-size: 13px; }
+.ending.ok { background: #eefaf3; border-color: #b7e3cd; }
+.ending.warn { background: #fff8e8; border-color: #f0d79a; }
+.ending.bad { background: #fdf2f2; border-color: #f2c2c2; }
+
+.abandon { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #d5dae1; font-size: 12.5px; color: #555; display: flex; flex-direction: column; gap: 8px; }
+.abandon-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.ops button.danger { background: #fdeaea; border-color: #c33; color: #a11; }
+.ops button.danger:hover { background: #f9d5d5; }
+.fallback-note { border-left: 3px solid #f0cfa8; padding-left: 8px; }

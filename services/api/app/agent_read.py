@@ -123,8 +123,13 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
             a = event.activity_task_scheduled_event_attributes
             acts[event.event_id] = {
                 "name": a.activity_type.name,
+                # The activity's own arguments, kept because the proposal's
+                # evidence is here: the loop attaches the candidate's and the
+                # incumbent's metrics to the payload, so the approval card reads
+                # from history like everything else.
+                "input": _decode(a.input.payloads) or {},
                 "at": _when(event), "started": None, "done": None,
-                "result": None, "failed": None,
+                "result": None, "failed": None, "seconds": 0.0, "attempts": 0,
             }
         elif kind == "ACTIVITY_TASK_STARTED":
             a = event.activity_task_started_event_attributes
@@ -132,13 +137,19 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
             rec = acts.get(a.scheduled_event_id)
             if rec is not None:
                 rec["started"] = _when(event)
+                # An attempt beyond the first is the mark of an interruption that
+                # the run survived — the rail breaks there, durably.
+                rec["attempts"] = max(rec["attempts"], a.attempt)
         elif kind == "ACTIVITY_TASK_COMPLETED":
             a = event.activity_task_completed_event_attributes
             rec = acts.get(a.scheduled_event_id)
             if rec is not None:
                 rec["done"] = _when(event)
                 rec["result"] = _decode(a.result.payloads)
-            work_seconds += _attempt_seconds(attempt_started, a, event, acts)
+            spent = _attempt_seconds(attempt_started, a, event, acts)
+            work_seconds += spent
+            if rec is not None:
+                rec["seconds"] += spent
         elif kind in ("ACTIVITY_TASK_FAILED", "ACTIVITY_TASK_TIMED_OUT"):
             a = (event.activity_task_failed_event_attributes if kind.endswith("FAILED")
                  else event.activity_task_timed_out_event_attributes)
@@ -149,7 +160,10 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
             if rec is not None and a.retry_state != RetryState.RETRY_STATE_IN_PROGRESS:
                 rec["done"] = _when(event)
                 rec["failed"] = _failure_message(a)
-            work_seconds += _attempt_seconds(attempt_started, a, event, acts)
+            spent = _attempt_seconds(attempt_started, a, event, acts)
+            work_seconds += spent
+            if rec is not None:
+                rec["seconds"] += spent
         elif kind == "WORKFLOW_EXECUTION_COMPLETED":
             result = _decode(event.workflow_execution_completed_event_attributes.result.payloads)
         elif kind == "WORKFLOW_EXECUTION_FAILED":
@@ -160,6 +174,13 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
     # is one brain call → one tool call → one observation.
     transcript: list[dict] = []
     promotion: dict | None = None
+    # Whether the run is still going. An activity with no result and no failure
+    # means two very different things depending on this: still being made (the
+    # panel shows it in flight, clock running) or never executed because the run
+    # ended on that decision (`not_executed`). Note this is decided from the
+    # workflow's status and its ending event, both known by now — the assembled
+    # `terminal` dict is built below, after the walk.
+    run_is_open = status == "RUNNING" and result is None and failure_message is None
 
     for rec in (acts[i] for i in sorted(acts)):
         if rec["name"] in PLUMBING:
@@ -170,11 +191,16 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
                 "at": (rec["done"] or rec["started"] or rec["at"]).isoformat(),
                 "tool": None, "arguments": {}, "rationale": "", "observation": "",
                 "producer": "", "ok": False, "kind": "pending", "pending": True,
+                "phase": "deciding",
+                "seconds": round(rec["seconds"], 1),
+                "attempts": max(1, rec["attempts"]),
+                "interrupted": rec["attempts"] > 1,
             }
             decision = rec["result"]
             if decision:
                 entry.update({
                     "pending": False,
+                    "phase": None,
                     "tool": decision.get("tool"),
                     "arguments": decision.get("arguments") or {},
                     "rationale": decision.get("rationale", ""),
@@ -189,7 +215,8 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
             elif rec["failed"]:
                 # The run died here — there is no ending to read, but the step
                 # that killed it is in history.
-                entry.update({"pending": False, "kind": "activity_failed", "observation": rec["failed"]})
+                entry.update({"pending": False, "phase": None, "kind": "activity_failed",
+                              "observation": rec["failed"]})
             transcript.append(entry)
             continue
 
@@ -197,30 +224,58 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
         if not transcript:
             continue
         entry = transcript[-1]
-        entry["pending"] = False
+        entry["seconds"] = round(entry.get("seconds", 0.0) + rec["seconds"], 1)
+        entry["attempts"] = max(entry.get("attempts", 1), rec["attempts"])
+        entry["interrupted"] = entry["attempts"] > 1
         if rec["result"] is not None:
+            entry["pending"] = False
+            entry["phase"] = None
             tool_result = rec["result"]
             entry["observation"] = tool_result.get("digest", "")
             entry["ok"] = bool(tool_result.get("ok"))
             entry["kind"] = tool_result.get("kind", "ok")
             if rec["name"] == "propose_promotion" and tool_result.get("ok"):
+                proposal = rec.get("input") or {}
                 promotion = {
                     "workflow_id": tool_result.get("workflow_id", ""),
                     "version": tool_result.get("version", ""),
                     "filed_at": (rec["done"] or rec["at"]).isoformat(),
                     "outcome": None,
+                    # The approval card's contents, read from the activity's own
+                    # arguments rather than from a second store.
+                    "rationale": proposal.get("rationale", ""),
+                    "evidence": {"candidate": proposal.get("candidate_metrics"),
+                                 "incumbent": proposal.get("incumbent_metrics")},
+                    # What the decision cost: the steps the agent had used when it
+                    # asked, and how many trainings it actually ran.
+                    "cost": {
+                        "steps": len(transcript),
+                        "trainings": sum(
+                            1 for s in transcript
+                            if s.get("tool") == "train_candidate" and s.get("ok")
+                        ),
+                    },
                 }
             entry["at"] = (rec["done"] or rec["at"]).isoformat()
         elif rec["failed"]:
-            entry.update({"observation": rec["failed"], "ok": False, "kind": "activity_failed"})
+            entry.update({"observation": rec["failed"], "ok": False,
+                          "kind": "activity_failed", "pending": False, "phase": None})
             entry["at"] = (rec["done"] or rec["at"]).isoformat()
         elif entry.get("tool") and entry["tool"] not in TOOL_ACTIVITIES:
-            entry["observation"] = f"`{entry['tool']}` is not a tool the loop may call"
-            entry["kind"] = "unknown_tool"
+            entry.update({"observation": f"`{entry['tool']}` is not a tool the loop may call",
+                          "kind": "unknown_tool", "pending": False, "phase": None})
+        elif entry.get("tool") and run_is_open:
+            # The call is being made right now: scheduled, not finished, and the
+            # run has not ended. This is the state a killed worker leaves behind
+            # — and it is a tool call, not a decision, because a training is the
+            # longest thing in the loop and the likeliest thing to be in flight
+            # when the worker dies. The panel says so and keeps the clock running
+            # rather than showing an empty step.
+            entry.update({"pending": True, "phase": "calling", "kind": "calling"})
         elif entry.get("tool"):
             # The decision was usable but was never executed: the run stopped on
             # it (a `no_progress` ending, or the ending itself).
-            entry["kind"] = "not_executed"
+            entry.update({"kind": "not_executed", "pending": False, "phase": None})
 
     # The ending: the loop's own terminal entry, or the platform's verdict.
     terminal: dict | None = None
@@ -273,6 +328,9 @@ def project(run_id: str, status: str, events, now: datetime | None = None) -> di
         "waiting_seconds": round(waiting_seconds, 1),
         "steps": transcript,
         "step_count": len([s for s in transcript if not s.get("pending")]),
+        # How many times this run was interrupted and carried on. Durable, from
+        # the activity attempts — not a guess from how long something has been quiet.
+        "interruptions": sum(1 for s in transcript if s.get("interrupted")),
         "promotion": promotion,
         "terminal": terminal,
         # Said out loud, because it is the claim the panel makes: this did not
@@ -319,7 +377,7 @@ async def list_runs(limit: int = LIST_LIMIT, now: datetime | None = None) -> lis
     runs = [r for r in projected if r]
     return [
         {k: r[k] for k in ("run_id", "goal", "state", "reason", "step_count",
-                           "started_at", "elapsed_seconds", "work_seconds",
-                           "waiting_seconds", "promotion")}
+                           "interruptions", "started_at", "elapsed_seconds",
+                           "work_seconds", "waiting_seconds", "promotion")}
         for r in runs
     ]

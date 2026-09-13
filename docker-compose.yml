@@ -163,9 +163,6 @@ services:
     - 8082:80
     volumes:
     - ./diagrams:/usr/share/nginx/html/diagrams:ro
-    # Throwaway prototype mock (wayfinder T07). Served exactly like diagrams so the
-    # console can render it with no image rebuild. Delete this mount with prototype/.
-    - ./prototype:/usr/share/nginx/html/prototype:ro
   trainer:
     build:
       context: .

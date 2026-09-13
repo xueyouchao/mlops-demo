@@ -223,27 +223,29 @@ AGENT_TOOL_POLICY: dict[str, dict] = {
     "read_registry": {"attempts": 3, "start_to_close": timedelta(seconds=60)},
     "read_run_metrics": {"attempts": 3, "start_to_close": timedelta(seconds=60)},
     "evaluate_version": {"attempts": 3, "start_to_close": timedelta(seconds=120)},
-    "train_candidate": {"attempts": 2, "start_to_close": timedelta(minutes=5),
-                        "schedule_to_start": timedelta(minutes=2)},
-    "propose_promotion": {"attempts": 1, "start_to_close": timedelta(seconds=60),
-                          "schedule_to_start": timedelta(minutes=2)},
+    "train_candidate": {"attempts": 2, "start_to_close": timedelta(minutes=5)},
+    "propose_promotion": {"attempts": 1, "start_to_close": timedelta(seconds=60)},
     # `conclude` is a pure function of its arguments, so retrying it is free —
     # and it is the step whose loss would cost the run its ending.
     "conclude": {"attempts": 3, "start_to_close": timedelta(seconds=30)},
 }
 
-# How long an activity task may sit *scheduled but never started*, and this one
-# is not optional here. Temporal's default is unlimited, and an unlimited wait is
-# a hang: a task delivered to a worker that dies before acknowledging it is
-# leased to nobody, and **nothing re-delivers it** — no timeout fires, because
-# `start_to_close` only begins once a task has started. Observed, not theorised:
-# a kill 8 s after step 4's brain call was scheduled left that run stalled with
-# the worker back up and healthy minutes later, and it would have stalled for
-# ever. A demo whose centrepiece is killing the worker cannot afford a run that
-# hangs when the kill lands in that window. 60 s is far beyond any queueing this
-# demo creates (one worker, four activity slots, a couple of runs) and far short
-# of an audience's patience.
-AGENT_SCHEDULE_TO_START = timedelta(seconds=60)
+# How long an activity task may sit *scheduled but never started*. Temporal's
+# default is unlimited, and an unlimited wait is a hang: a task delivered to a
+# worker that dies before acknowledging it is leased to nobody, and nothing
+# re-delivers it — no timeout fires, because `start_to_close` only begins once a
+# task has started. A kill in that window left a run stalled with the worker back
+# and healthy, and it would have stalled for ever.
+#
+# The bound has to be generous, and getting this wrong is easy: a *short* bound
+# turns an outage into a failure. A schedule-to-start timeout counts as an
+# attempt, so a 60 s bound plus a brain call's two attempts means a worker that
+# is down for two minutes does not stall the run — it kills it, which is the
+# opposite of what this demo is about. Ten minutes is longer than any outage the
+# demo shows, so being down costs the run nothing but time (the run waits, and
+# resumes when a worker returns, which is the story), while a task stranded on a
+# dead worker is still re-delivered rather than never.
+AGENT_SCHEDULE_TO_START = timedelta(minutes=10)
 
 # Above the brain activity's own 60 s request timeout plus its one retry: this is
 # the workflow-side safety net, not where the timeout is actually enforced.
@@ -382,7 +384,7 @@ class InvestigationWorkflow:
             result = await workflow.execute_activity(
                 tool, payload,
                 start_to_close_timeout=policy["start_to_close"],
-                schedule_to_start_timeout=policy.get("schedule_to_start", AGENT_SCHEDULE_TO_START),
+                schedule_to_start_timeout=AGENT_SCHEDULE_TO_START,
                 retry_policy=RetryPolicy(maximum_attempts=policy["attempts"]),
             )
 

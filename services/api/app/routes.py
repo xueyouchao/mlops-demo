@@ -125,22 +125,31 @@ def promote(version_id: str, user=Depends(require_role("operator", "admin"))):
 
 
 @router.post("/{version_id}/approve")
-def approve(version_id: str, workflow_id: str | None = None,
+def approve(version_id: str, workflow_id: str | None = None, approved: bool = True,
             user=Depends(require_role("operator", "admin"))):
-    """The operator's approve button — resumes the Temporal workflow with identity."""
-    # Re-check servability at the moment of approval, not just at promote time:
-    # the artifact can disappear in between (a container recreate used to delete
-    # every artifact), and approving is what makes a version live.
-    _assert_servable(version_id)
-    # Send the human approval signal into the durable workflow, then confirm.
+    """The operator's decision — approve resumes the workflow, decline ends it.
+
+    Both are decisions, and both have to reach the durable workflow: a decline
+    that only changed a screen would leave the workflow waiting for an answer
+    that has already been given, and would leave the agent run waiting with it.
+    """
+    # Servability is re-checked at the moment of approval, not just at promote
+    # time: the artifact can disappear in between (a container recreate used to
+    # delete every artifact), and approving is what makes a version live. A
+    # decline moves nothing, so it does not need the version to be promotable.
+    if approved:
+        _assert_servable(version_id)
     # A signal that cannot be delivered must not be swallowed: we would move
     # MLflow to Production while the durable workflow is still waiting, and the
     # caller would get an unhandled 500 (which is how this reached Sentry).
     if workflow_id and state.port is not None:
         try:
-            state.port.send_approval_signal(workflow_id, True, user["username"])
+            state.port.send_approval_signal(workflow_id, approved, user["username"])
         except Exception:
             raise HTTPException(502, f"could not signal workflow '{workflow_id}'")
+    if not approved:
+        return {"ok": True, "version_id": version_id, "approved": False,
+                "declined_by": user["username"]}
     _lc().confirm_approval(version_id, workflow_id or "wf-demo", approved_by=user["username"])
     sync_routing(state.routing_weights())
     return {"ok": True, "version_id": version_id, "stage": "production", "approved_by": user["username"]}

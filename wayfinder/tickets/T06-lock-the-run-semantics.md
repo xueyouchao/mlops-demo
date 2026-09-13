@@ -88,7 +88,9 @@ Observed, not reasoned: a run was killed 8 s after step 4's brain call was *sche
 
 This is not a theoretical hole in a demo that kills the worker on purpose: a kill landing in that window turns the climax into a run that never moves again, on stage, with no error to explain it.
 
-**What changed:** every agent activity now carries `schedule_to_start_timeout` — 60 s for the brain call, the reads, `evaluate_version` and `conclude`, and 120 s for `train_candidate` and `propose_promotion`, the two with the smallest retry budgets. Verified as written into history on a fresh run. The *rescue itself* was not reproduced, because it needs a sub-second kill window: it is recorded as a bound that exists, not as a crash survived.
+**What changed:** every agent activity now carries `schedule_to_start_timeout`, set to **ten minutes**. Verified as written into history on a fresh run. The *rescue itself* was not reproduced, because it needs a kill in the window between a task being scheduled and a worker acknowledging it: it is recorded as a bound that exists, not as a crash survived.
+
+Getting the number right took a correction, and the correction is the interesting part. The first version of this bound was 60 s, on the reasoning that it only had to be longer than any queueing the demo creates. That was wrong in the way that matters most here: **a schedule-to-start timeout counts as a failed attempt**, so a 60 s bound against a brain call's two attempts means a worker that is down for two minutes does not leave the run waiting — it *kills* it. A demo about surviving an outage would have been built on a loop that dies in one. Ten minutes is longer than any outage the demo shows, so being down costs a run nothing but time (it waits, and resumes when a worker returns, which is the story the demo is telling), while a task stranded on a dead worker is still re-delivered rather than never.
 
 Decision 6's retry counts are unchanged, with one addition: `conclude` takes 3 attempts rather than 1. It is a pure function of its arguments, so retrying it is free, and it is the single step whose loss costs the run its ending.
 

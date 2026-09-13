@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 
+import { AgentPanel } from "./AgentPanel.jsx";
+import { api, errorText } from "./api.js";
+
 /**
  * mlops-demo — Model Lifecycle Ops Console → single-origin harness.
  * Left sidebar switches tabs between the inline lifecycle console and
@@ -19,6 +22,7 @@ const SENTRY_URL = `https://${SENTRY_HOST}/organizations/${SENTRY_ORG_SLUG}/issu
 
 const TABS = {
   ops:                 { kind: "inline", title: "Ops Console", short: "Ops" },
+  agent:               { kind: "inline", title: "Investigation Agent", short: "Agent" },
   "diagram-architecture": { kind: "frame",  title: "Architecture", short: "Arch", src: "/diagrams/architecture.html", group: "Diagrams" },
   "diagram-workflow":    { kind: "frame",  title: "Workflow",      short: "WF",   src: "/diagrams/workflow.html",    group: "Diagrams" },
   "diagram-lifecycle":   { kind: "frame",  title: "Lifecycle",     short: "LC",   src: "/diagrams/lifecycle.html",   group: "Diagrams" },
@@ -31,25 +35,12 @@ const TABS = {
 };
 
 const SECTIONS = [
-  { label: "Lifecycle", ids: ["ops"] },
+  { label: "Lifecycle", ids: ["ops", "agent"] },
   { label: "Diagrams", ids: ["diagram-architecture", "diagram-workflow", "diagram-lifecycle", "diagram-sequence", "diagram-dataflow"] },
   { label: "Apps & docs", ids: ["temporal", "mlflow", "docs", "sentry"] },
 ];
 
-const api = (path, opts = {}) =>
-  fetch(`${API}${path}`, { credentials: "include", ...opts });
-
 const shortLabel = (t) => t.short || t.title;
-
-// FastAPI reports errors as {"detail": ...}: a sentence for our own messages, or
-// a list for pydantic validation. Surface the sentence, not the JSON dump.
-const errorText = (body, status) => {
-  const d = body?.detail;
-  if (typeof d === "string") return d;
-  if (Array.isArray(d))
-    return d.map((e) => `${(e.loc || []).slice(1).join(".")}: ${e.msg}`).join("; ");
-  return body ? JSON.stringify(body) : `request failed (HTTP ${status})`;
-};
 
 function useApi() {
   const [data, setData] = useState(null);
@@ -330,6 +321,10 @@ function Shell({ me, onLogout }) {
   const active = TABS[tab];
 
   const renderPane = () => {
+    // The agent panel is its own sidebar entry, not a section of the ops console
+    // (T07): the console is about the lifecycle's state, this is about one run's
+    // history, and mixing them buries the run.
+    if (tab === "agent") return <AgentPanel me={me} />;
     if (active.kind === "inline") return <InlineConsole data={data} error={error} call={call} refresh={refresh} />;
     if (active.kind === "link")
       return (

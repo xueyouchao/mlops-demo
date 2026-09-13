@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from . import agent_read, security
 from .security import require_role
 from .state import state
+from .temporal_port import temporal_client
 
 router = APIRouter(prefix="/api/agent", tags=["agent"])
 
@@ -67,4 +68,55 @@ def get_run(run_id: str, user=Depends(security.get_current_user)):
     except agent_read.RunNotFound:
         raise HTTPException(404, f"no investigation run {run_id}")
     except Exception as e:
-        raise HTTPException(503, f"Temporal is not reachable: {e}") from e
+        # Say what failed. A bug in the projection used to surface here as
+        # "Temporal is not reachable", which sent me looking at the wrong service.
+        raise HTTPException(503, f"could not read run {run_id}: {e}") from e
+
+
+async def _abandon(run_id: str, actor: str) -> dict:
+    """Abandon a run — and withdraw the promotion it filed.
+
+    Abandoning decides the *run*; approve and decline decide the *promotion*, so
+    they are different actions on different objects (T07). But the promotion
+    cannot simply be left behind: one pending promotion per model means an
+    orphan would block every later proposal for ever, and nothing would be
+    waiting on it any more. So it is terminated rather than approved or
+    declined — nobody decided anything, and the record should not pretend
+    otherwise.
+    """
+    run = await agent_read.load_run(run_id)  # raises RunNotFound
+    client = await temporal_client()
+    withdrawn = None
+
+    promotion = run.get("promotion") or {}
+    if promotion.get("workflow_id") and not promotion.get("outcome"):
+        handle = client.get_workflow_handle(promotion["workflow_id"])
+        try:
+            desc = await handle.describe()
+            if desc.status.name == "RUNNING":
+                await handle.terminate(
+                    reason=f"withdrawn by {actor}: the run that asked was abandoned"
+                )
+                withdrawn = promotion["workflow_id"]
+        except Exception:
+            pass  # already gone, or never startable: nothing left to withdraw
+
+    handle = client.get_workflow_handle(run_id)
+    desc = await handle.describe()
+    if desc.status.name != "RUNNING":
+        return {"ok": True, "run_id": run_id, "run_status": desc.status.name,
+                "withdrawn_promotion": withdrawn, "note": "the run had already finished"}
+    await handle.terminate(reason=f"abandoned by {actor}")
+    return {"ok": True, "run_id": run_id, "run_status": "TERMINATED",
+            "withdrawn_promotion": withdrawn}
+
+
+@router.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str, user=Depends(require_role("operator", "admin"))):
+    """Abandon a run. The only escape from an operator who never decides."""
+    try:
+        return asyncio.run(_abandon(run_id, user["username"]))
+    except agent_read.RunNotFound:
+        raise HTTPException(404, f"no investigation run {run_id}")
+    except Exception as e:
+        raise HTTPException(502, f"could not abandon the run: {e}") from e
