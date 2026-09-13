@@ -22,3 +22,11 @@ What the human needs to judge:
 - **Where the panel lives** — a new sidebar entry alongside the existing inline console, a section of it, or a tab. The console is a single-origin harness with a sidebar (`/diagrams/`, `/temporal/`, `/mlflow/` are frame/link-out tabs).
 
 Deliverable: a throwaway mock the human reviews. Its resolution records what was accepted, and the build work later graduates from it.
+
+## Three rendering requirements inherited from the run semantics
+
+[Lock the run semantics](T06-lock-the-run-semantics.md) settled things the panel must show honestly:
+
+- **Elapsed work time apart from time spent waiting on the human gate.** The three-minute ceiling excludes the approval wait, so a single combined clock would misrepresent a run that is correctly waiting on the operator — the mock must show the two separately.
+- **Which of the four terminal reasons ended a run**: `concluded`, `budget_exhausted`, `no_progress`, `failed`.
+- **Which producer made each decision.** Every fallback decision is labelled, because the map's standing preference is that the demo never silently pretends.
