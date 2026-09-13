@@ -37,3 +37,11 @@ Deliverable: a throwaway mock the human reviews. Its resolution records what was
 
 - The start affordance is a **goal field with one-click presets** filling the same input, plus who is asking.
 - The transcript is **projected from Temporal history**, so the panel is showing exactly what the console can see when history is all it has — including while the worker is dead.
+
+## Inherited from the proposal handoff
+
+[Decide the proposal handoff into the approval gate](T05-decide-the-proposal-handoff-into-the-approval-gate.md) settled what the approval card contains, and left the mock one question of its own:
+
+- The card shows the **candidate version, its metrics against the incumbent on the same split, the rationale, and the cost paid** (steps used, trainings run), with a way through to the transcript.
+- Because the run now **waits** on the operator, the console shows an `awaiting-approval` run — and the mock must decide whether the operator can **cancel** one, since that is the only escape from never deciding.
+- One pending promotion per model: the mock should not design a queue, because a second proposal is refused.
