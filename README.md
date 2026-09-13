@@ -121,6 +121,25 @@ Bounded contexts communicate **only** through domain events — which double as 
 - **Serving:** weight-based **canary + blue-green** router (A/B measurement is out of scope).
 - **Sentry:** `sentry-sdk` wired across services, driven by `SENTRY_DSN` env
   (no-ops when empty; no self-hosted Sentry).
+- **Investigation agent:** a durable ReAct loop on Temporal (8 steps, one tool call
+  each, brain as an activity) that can investigate the registry, train a candidate and
+  propose a promotion — then waits at the same human gate. Its transcript is its own
+  event history. See the **Agent** tab in the console, and
+  [`docs/demo-script.md`](docs/demo-script.md) for the demo that kills the worker on
+  purpose.
+
+---
+
+## Run the demo
+
+```bash
+./scripts/demo-reset.sh     # clean state, then open the console and the Agent tab
+```
+
+The script, the narration and the numbers are in
+[`docs/demo-script.md`](docs/demo-script.md). Run the reset before every rehearsal:
+the demo's own state (a promotion parked at the gate, a staging version whose artifact
+is gone) is the easiest thing to leave broken.
 
 ---
 
