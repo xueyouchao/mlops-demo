@@ -34,6 +34,7 @@ Pinned by the human during charting: **no** architecture write-up or ADR, **no**
 
 <!-- one line per closed ticket: enough to judge relevance, then zoom the link for detail -->
 
+- [Prototype the console's agent panel](tickets/T07-prototype-the-console-agent-panel.md) — the **Timeline** in its own sidebar entry: a spine whose rail *breaks* at the worker's death and shows the resume, a `deciding…` node so 25 s of model time is not dead air, fallbacks spelled out rather than chipped, and Cancel separated from Approve/Decline because those decide the promotion while abandoning decides the run
 - [Decide the proposal handoff into the approval gate](tickets/T05-decide-the-proposal-handoff-into-the-approval-gate.md) — the run stays alive while the operator decides and its ending records the outcome; a proposal carries a pointer (run id, version, comparative metrics, rationale) not a duplicate; at most one pending promotion per model; the optimistic API response stays but the agent reads the real outcome from Temporal
 - [Decide how an investigation starts](tickets/T03-decide-how-an-investigation-starts.md) — a free-text goal with presets filling the same field, fixed as workflow input; an impossible goal is carried by `conclude` rather than a new tool or reason; the existing operator/admin gate applies
 - [Decide where the agent transcript lives](tickets/T04-decide-where-the-agent-transcript-lives.md) — read from the Temporal server's history, always: one path that works while the worker is dead, which is what makes the killed-worker moment readable; a query was rejected because it needs a live worker, and no duplicate store is created
@@ -43,12 +44,24 @@ Pinned by the human during charting: **no** architecture write-up or ADR, **no**
 - [Lock the agent loop contract](tickets/T01-lock-the-agent-loop-contract.md) — flat ReAct (one step = one brain call → one tool → one observation); cap 8, retries free; the brain is stateless and the transcript is the memory, recording the rationale but never the raw thinking; bad output becomes an observation that burns a step; three endings, and "no better candidate" is a legitimate result rather than an error
 - [Research how production durable-agent frameworks structure their loops](tickets/T09-research-durable-agent-loop-patterns.md) — our shape *is* Temporal's shipped pattern (loop in the workflow, model call as an activity, transcript in workflow state); Temporal ships no step bound, so ours is ours alone to define; and the demo carries an at-least-once hole — a retried activity restarts from the top with its failed attempt unrolled-back, so a kill during training risks training twice
 
+## Build tickets
+
+<!-- graduated when the decision tickets closed: execution is carried into this map -->
+
+Ordered by dependency, not by importance. The frontier is whatever has no open blocker — see [wayfinder/TRACKER.md](TRACKER.md).
+
+- [B01 Build the agent loop workflow](tickets/B01-build-the-agent-loop-workflow.md) — the ReAct loop and the API's start route, exactly as the loop contract locked it
+- [B02 Build the brain activity and the fallback](tickets/B02-build-the-brain-activity-and-fallback.md) — ollama with the six tool schemas, and the labelled deterministic policy behind it
+- [B03 Build the six tool activities](tickets/B03-build-the-six-tool-activities.md) — bounded digests, the servability pre-check, the training cap, training made idempotent
+- [B04 Project the transcript from Temporal history](tickets/B04-project-the-transcript-from-temporal-history.md) — the read path that still works while the worker is dead
+- [B05 Build the console panel](tickets/B05-build-the-console-panel.md) — the agreed Timeline design in `ui/src/App.jsx`
+- [B06 Script the kill and the resume](tickets/B06-script-the-kill-and-the-resume.md) — the demo moment itself, with the narration the map insists on
+
 ## Not yet specified
 
 <!-- the fog: in-scope, not yet sharp enough to ticket -->
 
 - **Mid-run human steering** — nudging, pausing, or interrupting a running investigation. Sharpen once [Lock the agent loop contract](tickets/T01-lock-the-agent-loop-contract.md) and [Lock the run semantics](tickets/T06-lock-the-run-semantics.md) have settled what the loop can accept mid-flight.
-- **How the killed-worker resume is *shown*** — the mechanics of the demo moment itself: what the operator sees in the console while the worker is down and after it returns. The research sharpened this (the read path must work during the outage, which constrains the store — now written into [Decide where the agent transcript lives](tickets/T04-decide-where-the-agent-transcript-lives.md)), but what the panel actually renders during the dead window is still unspecified. Depends on T04 and [Lock the run semantics](tickets/T06-lock-the-run-semantics.md).
 - **Concurrent investigations** — two agents at once, or an agent investigating while an operator promotes. Sharpen when [Define the agent's tool surface & schemas](tickets/T02-define-the-agent-tool-surface-and-schemas.md) lands, since the answer is largely about which writes need a claim.
 - **Post-demo: multi-agent fan-out** — parallel investigations that compare candidates. The loop contract may make this cheap; it is not needed for the destination.
 
