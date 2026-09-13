@@ -109,3 +109,25 @@ class TemporalLifecyclePort(orch.LifecyclePort):
             except Exception as e:  # surface why, instead of a bare FAILED
                 info["error"] = str(e).splitlines()[0][:300]
         return info
+
+    # ---- the investigation agent --------------------------------------------
+    def start_investigation(self, goal: str, actor: str, max_steps: int = 8) -> str:
+        return asyncio.run(self._start_investigation(goal, actor, max_steps))
+
+    async def _start_investigation(self, goal: str, actor: str, max_steps: int) -> str:
+        """Start an InvestigationWorkflow — the ReAct loop — and return its run id.
+
+        The id is `agent-<hex>` and that prefix *is* the addressability contract:
+        the run's transcript is its own event history, so the workflow id is how
+        the console reads it back, and how it finds runs to list. A unique id per
+        run, unlike promotion's deterministic one, because starting two
+        investigations is not a duplicate — it is two investigations.
+        """
+        client = await _client()
+        handle = await client.start_workflow(
+            "InvestigationWorkflow",
+            {"goal": goal, "requested_by": actor, "max_steps": max_steps},
+            id=f"agent-{uuid.uuid4().hex[:8]}",
+            task_queue=TASK_QUEUE,
+        )
+        return handle.id

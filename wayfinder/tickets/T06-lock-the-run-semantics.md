@@ -68,3 +68,15 @@ Recorded because the alternative was worse in a way that matters to this map: le
 
 **One consequence left deliberately unaddressed:** the brain activity's own timeout stays at 60 s. That is ~1.6× the worst call observed, and a call that overruns it falls back to the scripted policy — a labelled degradation, which is the designed behaviour rather than a failure. Raising the timeout instead would let a single slow call eat a quarter of the run's budget.
 
+## Amendment — 2026-09-13 (second): the ceiling charges *step* time, not elapsed time
+
+Found by the build's own verification, on the first real kill. The worker was SIGKILLed 35 s into a run; the run then sat frozen for **ten minutes** while nothing was running; the worker came back and the run resumed correctly from its five recorded steps — and immediately ended `budget_exhausted`, because the ten-minute outage had been charged to the agent as work.
+
+That is the demo's centrepiece failing *because of* the demo's centrepiece: a run whose whole point is surviving a kill would die of the kill. Worse, it fails in the one place an audience is watching, and it fails only when the outage is long enough — so a rehearsal would have passed and the live demo might not.
+
+**What changed:** the ceiling now charges each step its own duration, capped at two minutes per step, and subtracts the operator wait. Elapsed time is no longer the unit, because elapsed time also grows while the platform is *not running*, and that is not the agent working.
+
+**What that preserves:** the ceiling's stated purpose — stopping a wedged activity. A wedged step charges its two-minute cap rather than vanishing, so two of them still exceed six minutes and end the run. Nothing else moved: still the workflow clock, still the approval wait excluded, still the four terminal reasons.
+
+Also found by the same kill, and worth keeping: the in-flight activity was a `train_candidate`. It had **already registered v7** when the worker died, and the retry returned *"v7 already exists for exactly these hyperparameters and this data — reused, no new version registered."* Decision 1's idempotency lookup is therefore proven under a real SIGKILL rather than a manual double-call, which is the version of that evidence that counts.
+

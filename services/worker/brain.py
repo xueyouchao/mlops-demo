@@ -141,7 +141,7 @@ Rules:
 - You may NOT approve a promotion and you may NOT roll back production. Those decisions belong to the operator.
 - Exactly one promotion may be pending per model, so propose once.
 - Never call the same tool with the same arguments twice in a row: the run is ended as no_progress if you do.
-- Tool arguments must match the schema exactly, with no extra keys.
+- Tool arguments must match the schema exactly, with no extra keys. Version arguments are bare numbers: write 6, not v6.
 - When the evidence is in, call conclude. Concluding with "no better candidate" is a legitimate, expected result — say so rather than inventing one.
 - Every call carries a `why` argument: one sentence on why this call, right now. That is where your reasoning goes — not in prose around the call, and not in private thinking.
 - Your reply must be the tool call itself."""

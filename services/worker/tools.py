@@ -61,6 +61,17 @@ def _client() -> MlflowClient:
     return MlflowClient(tracking_uri=MLFLOW_TRACKING_URI)
 
 
+def _version_arg(payload: dict) -> str:
+    """The version the brain asked for, as a bare number.
+
+    The digests write versions as `v6`, and the model faithfully passes `v6`
+    straight back. Stripping the prefix is not laxness: the first real run spent
+    a step on `there is no vv5`, and a tool that punishes the notation it taught
+    is just a trap with extra steps.
+    """
+    return str(payload.get("version") or "").strip().lstrip("vV").strip()
+
+
 def _verdict(kind: str, message: str, **extra) -> dict:
     """An expected refusal: the brain reads this and adapts. Never retried."""
     return {"ok": False, "kind": kind, "digest": message, "error": message, **extra}
@@ -197,7 +208,7 @@ def evaluate_version(payload: dict) -> dict:
     the scripted policy parses out of the transcript when it compares a candidate
     against the incumbent.
     """
-    version = str(payload.get("version") or "").strip()
+    version = _version_arg(payload)
     if not version:
         return _verdict("bad_arguments", "evaluate_version needs a version")
 
@@ -392,7 +403,7 @@ def propose_promotion(payload: dict) -> dict:
     work. That ordering is the whole point: otherwise the operator approves and
     only then watches it fail.
     """
-    version = str(payload.get("version") or "").strip()
+    version = _version_arg(payload)
     rationale = (payload.get("rationale") or "").strip()
     if not version:
         return _verdict("bad_arguments", "propose_promotion needs a version")
@@ -452,3 +463,36 @@ def conclude(payload: dict | None = None) -> dict:
         return _verdict("bad_arguments", "conclude needs an answer")
     return _ok(f"concluded: {answer}" + (f" · evidence: {evidence}" if evidence else ""),
                answer=answer, evidence=evidence)
+
+
+# --------------------------------------------------------------------------
+# Loop plumbing — not a tool, and never offered to the brain
+# --------------------------------------------------------------------------
+@activity.defn
+def promotion_outcome(payload: dict) -> dict:
+    """How a promotion the agent filed actually ended, read from Temporal.
+
+    The loop's fast path is the signal `PromotionWorkflow` sends when it finishes.
+    This is the slow path, for a promotion that ended *without* signalling —
+    terminated, or failed before it could. Without it a termined promotion leaves
+    the agent run waiting forever for an approval that can never arrive, which is
+    not hypothetical: it is what the wedged v4 promotion would have done.
+    """
+    workflow_id = str(payload.get("workflow_id") or "")
+    if not workflow_id:
+        return {"status": "UNKNOWN", "error": "no workflow_id"}
+
+    async def probe() -> dict:
+        client = await TemporalClient.connect(f"{TEMPORAL_HOST}:{TEMPORAL_PORT}")
+        handle = client.get_workflow_handle(workflow_id)
+        desc = await handle.describe()
+        status = desc.status.name if desc.status is not None else "UNKNOWN"
+        state: dict = {"workflow_id": workflow_id, "status": status}
+        if status == "COMPLETED":
+            state["outcome"] = await handle.result()
+        return state
+
+    try:
+        return asyncio.run(probe())
+    except Exception as e:
+        return {"workflow_id": workflow_id, "status": "NOT_FOUND", "error": str(e)[:200]}

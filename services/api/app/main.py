@@ -46,5 +46,7 @@ def healthz():
 
 
 from . import routes  # noqa: E402
+from . import agent_routes  # noqa: E402
 
 app.include_router(routes.router)
+app.include_router(agent_routes.router)

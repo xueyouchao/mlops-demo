@@ -16,12 +16,13 @@ from activities import brain_decide, promote_stage, rollback_stage, train_and_re
 from tools import (
     conclude,
     evaluate_version,
+    promotion_outcome,
     propose_promotion,
     read_registry,
     read_run_metrics,
     train_candidate,
 )
-from workflows import PromotionWorkflow, RollbackWorkflow, TrainingWorkflow
+from workflows import InvestigationWorkflow, PromotionWorkflow, RollbackWorkflow, TrainingWorkflow
 
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "temporal")
 TEMPORAL_PORT = int(os.getenv("TEMPORAL_PORT", "7233"))
@@ -38,12 +39,13 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue="ml-lifecycle",
-        workflows=[PromotionWorkflow, RollbackWorkflow, TrainingWorkflow],
+        workflows=[PromotionWorkflow, RollbackWorkflow, TrainingWorkflow, InvestigationWorkflow],
         activities=[
             promote_stage, rollback_stage, train_and_register, brain_decide,
             # the agent's six tools — every tool is an activity (T01)
             read_registry, read_run_metrics, evaluate_version,
             train_candidate, propose_promotion, conclude,
+            promotion_outcome,
         ],
         activity_executor=ThreadPoolExecutor(max_workers=4),
     )
