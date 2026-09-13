@@ -1,0 +1,24 @@
+---
+id: T07
+title: Prototype the console's agent panel
+labels: [wayfinder:prototype]
+status: open
+assignee: ""
+blocked-by: [T03, T04]
+---
+
+## Question
+
+What does the agent panel actually look like and read like, live, while a run is in flight?
+
+This is a **prototype** ticket: build the cheapest rough artifact that lets the human react — a static mock in the console's own style (`ui/src/App.jsx` + `style.css` conventions: `<section>`, `.row`, `.hint`, `.err`) with fake transcript data is enough. Do not wire it to a real workflow.
+
+What the human needs to judge:
+
+- **How the transcript reads.** Thought / tool call / observation as rows, a chat, or a timeline? The demo's punch is watching the reasoning, so legibility at a glance matters more than density.
+- **The durability moment.** What the panel shows while the worker is dead (stale? "worker down, run durable"?), and what it shows when the run resumes — the resume has to be *visible*, or the demo's climax happens off-screen.
+- **The proposal**, presented with the evidence [Decide the proposal handoff into the approval gate](T05-decide-the-proposal-handoff-into-the-approval-gate.md) settles, and the existing Approve button as the only way it goes live.
+- **Budget and state visibility** — steps used, elapsed time, and whether the scripted fallback is in play.
+- **Where the panel lives** — a new sidebar entry alongside the existing inline console, a section of it, or a tab. The console is a single-origin harness with a sidebar (`/diagrams/`, `/temporal/`, `/mlflow/` are frame/link-out tabs).
+
+Deliverable: a throwaway mock the human reviews. Its resolution records what was accepted, and the build work later graduates from it.
