@@ -30,3 +30,10 @@ Deliverable: a throwaway mock the human reviews. Its resolution records what was
 - **Elapsed work time apart from time spent waiting on the human gate.** The three-minute ceiling excludes the approval wait, so a single combined clock would misrepresent a run that is correctly waiting on the operator — the mock must show the two separately.
 - **Which of the four terminal reasons ended a run**: `concluded`, `budget_exhausted`, `no_progress`, `failed`.
 - **Which producer made each decision.** Every fallback decision is labelled, because the map's standing preference is that the demo never silently pretends.
+
+## Inherited from how a run starts and where the transcript comes from
+
+[Decide how an investigation starts](T03-decide-how-an-investigation-starts.md) and [Decide where the agent transcript lives](T04-decide-where-the-agent-transcript-lives.md) settled two things the mock should already assume:
+
+- The start affordance is a **goal field with one-click presets** filling the same input, plus who is asking.
+- The transcript is **projected from Temporal history**, so the panel is showing exactly what the console can see when history is all it has — including while the worker is dead.

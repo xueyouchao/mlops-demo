@@ -2,8 +2,8 @@
 id: T04
 title: Decide where the agent transcript lives
 labels: [wayfinder:grilling]
-status: open
-assignee: ""
+status: closed
+assignee: "dsh session"
 blocked-by: [T01]
 ---
 
@@ -32,3 +32,25 @@ Blocks [Prototype the console's agent panel](T07-prototype-the-console-agent-pan
 ## Partly settled by the loop contract
 
 [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) fixed the transcript's **shape**: an append-only list of typed entries in workflow instance state, each step recording the brain's short rationale and the tool's observation, with the raw `thinking` field deliberately never recorded (it is large, and activity results are visible in the Temporal Web UI). So the per-field decision above is half-made: reasoning traces are out. What remains here is the **store** (which of the two outage-surviving paths), the **read path**, and any further trimming of tool observations.
+
+## Resolution
+
+**The transcript's source of truth is Temporal history, and the console reads it from the *server* — always.** One code path, and it works whether the worker is up, restarting, or dead.
+
+Why not the obvious alternatives:
+
+- **A Temporal query is rejected outright.** Queries are answered by the worker, so during the outage they return `FAILED_PRECONDITION` — in exactly the window this demo wants to show something.
+- **A domain-event outbox write from each activity** would keep the console's current polling shape, but the worker would call the API, the API's memory would become a cache that dies on restart, and the same facts would be recorded twice — once in history, once in the outbox.
+- **A dedicated read model** is a new store that duplicates history and can drift from it.
+
+The consequences are worth stating, because they are what the demo is buying:
+
+- **The killed-worker moment is readable by construction.** History lives on the Temporal service, not in the worker, so the console can show every completed step while the worker is dead — which is the demo's climax.
+- **An API restart loses nothing.** Today's read model is in-memory and rehydrates from MLflow; the transcript needs no such rescue, because it is not stored there.
+- **The existing audit outbox is untouched.** Only the agent transcript comes from Temporal, so nothing is duplicated.
+
+**Read path and shape.** The console keeps its existing polling; the API projects history into transcript entries. Fetching only activity events keeps it cheap, and an 8-step transcript is a few KB — nowhere near the 51,200-event / 50 MB ceilings, which is why [Lock the run semantics](T06-lock-the-run-semantics.md) did not adopt Continue-As-New. The entry shape is the one [Lock the agent loop contract](T01-lock-the-agent-loop-contract.md) fixed: per step, the decision (tool, arguments, rationale) and the observation digest, with the raw `thinking` never recorded. The per-field trimming question that opened this ticket is therefore half-moot — reasoning traces are out by decision, and the remaining observations are already bounded digests by [Define the agent's tool surface & schemas](T02-define-the-agent-tool-surface-and-schemas.md).
+
+**Build note:** the projection walks `ActivityTaskCompleted` events in order, so brain and tool activities must be distinguishable by name or by a marker in the result payload. Decide that when implementing, not here.
+
+**What the console renders during the dead window** is [Prototype the console's agent panel](T07-prototype-the-console-agent-panel.md)'s question; this ticket only guarantees the data is readable then.
