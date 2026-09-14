@@ -56,6 +56,7 @@ Ordered by dependency, not by importance. The frontier is whatever has no open b
 - [B04 Project the transcript from Temporal history](tickets/B04-project-the-transcript-from-temporal-history.md) — the read path that still works while the worker is dead
 - [B05 Build the console panel](tickets/B05-build-the-console-panel.md) — the agreed Timeline design in `ui/src/App.jsx`
 - [B06 Script the kill and the resume](tickets/B06-script-the-kill-and-the-resume.md) — the demo moment itself, with the narration the map insists on
+- [B07 Build a second estimator family behind the train_candidate tool](tickets/B07-build-a-second-estimator-family.md) — `model_kind` + validated parameters, so the agent can choose an inductive bias and not just re-tune one
 
 ## Not yet specified
 

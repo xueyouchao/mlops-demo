@@ -77,6 +77,21 @@ the worker (no `tools` profile, no shell), and the new version lands in
 **Staging**. Training never edits an existing version — `ModelVersion` is
 immutable by design, so a retrain is always a new version number.
 
+**Two estimator families, one trainer.** The agent's `train_candidate` tool takes a
+`model_kind` plus *that kind's* parameters, validated per kind:
+
+| `model_kind` | parameters | why it exists |
+|---|---|---|
+| `gradient_boosting` | `n_estimators`, `max_depth`, `learning_rate` | the original estimator |
+| `logistic_regression` | `C`, `max_iter` | a linear model on standardized features — a genuinely different inductive bias, and milliseconds to train |
+
+Both kinds log under the **same registry name**, with the same `accuracy` / `roc_auc`
+metrics, so promotion, serving, drift and the console need no new concept. Idempotency
+is keyed on the **dataset, the kind and the parameters**, so repeating a training
+reuses the version it already registered instead of adding a second one. The console's
+Train panel is still the gradient-boosting one: its three knobs *are* that kind's
+parameters, mapped in `TrainingWorkflow`.
+
 **Flow to demo:**
 1. Sign in to the console → you'll see the version staged as **Staging**.
 2. Click **Start a promotion (goes to the gate)** → the Temporal workflow starts

@@ -24,6 +24,7 @@ from mlflow.tracking import MlflowClient
 from ml_platform.registry_health import artifact_problem
 
 import brain
+import model_kinds
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 
@@ -73,25 +74,41 @@ def promote_stage(payload: dict) -> dict:
 
 @activity.defn
 def train_and_register(payload: dict) -> dict:
-    """Train a candidate model from operator-supplied hyperparameters.
+    """Train a candidate model of the requested kind from the supplied parameters.
 
-    This is the retrain path behind the console's Train button. It produces a
-    *new* registered version staged to Staging — never edits an existing one,
-    because ModelVersion is immutable by design. Reaching Production is still a
-    separate human-gated promotion.
+    This is the retrain path behind the console's Train button *and* behind the
+    agent's `train_candidate` tool — one trainer, because comparability of the
+    numbers in the registry depends on one split, one seed and one set of logged
+    metrics, whichever estimator produced them. It produces a *new* registered
+    version staged to Staging — never edits an existing one, because ModelVersion
+    is immutable by design. Reaching Production is still a separate human-gated
+    promotion.
 
-    Retries are limited: a bad hyperparameter set will not fix itself, so the
-    workflow asks for at most two attempts to absorb a transient MLflow hiccup.
+    `model_kind` + `params` replaced three fixed numeric hyperparameters: the
+    estimator is one thing that varies, and `model_kinds` owns which kinds exist,
+    what their parameters mean and how they are built. A payload with no
+    `model_kind` still means gradient boosting with the original defaults, which is
+    what the console's three-knob panel sends.
+
+    Validation is re-checked here rather than trusted from the caller, for the same
+    reason `promote_stage` re-checks servability: the api and the agent both reach
+    this activity, and an unvalidated parameter set would be discovered as garbage
+    in the registry rather than as a refusal.
+
+    Retries are limited: a bad parameter set will not fix itself, so the workflow
+    asks for at most two attempts to absorb a transient MLflow hiccup.
     """
     name = payload["model_name"]
-    n_estimators = int(payload["n_estimators"])
-    max_depth = int(payload["max_depth"])
-    learning_rate = float(payload["learning_rate"])
+    kind = str(payload.get("model_kind") or model_kinds.DEFAULT_KIND)
+    params, problem = model_kinds.coerce(kind, payload.get("params"))
+    if problem:
+        # non-retryable: a malformed parameter set is a verdict, not a blip
+        raise ApplicationError(f"refusing to train: {problem}", non_retryable=True)
+    kind = kind.strip()
     requested_by = payload.get("requested_by", "system")
 
     try:
         from sklearn.datasets import load_breast_cancer
-        from sklearn.ensemble import GradientBoostingClassifier
         from sklearn.metrics import accuracy_score, roc_auc_score
         from sklearn.model_selection import train_test_split
 
@@ -101,12 +118,7 @@ def train_and_register(payload: dict) -> dict:
             X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
         )
 
-        model = GradientBoostingClassifier(
-            n_estimators=n_estimators,
-            max_depth=max_depth,
-            learning_rate=learning_rate,
-            random_state=RANDOM_STATE,
-        )
+        model = model_kinds.build(kind, params, RANDOM_STATE)
         model.fit(X_train, y_train)
 
         acc = float(accuracy_score(y_test, model.predict(X_test)))
@@ -114,15 +126,20 @@ def train_and_register(payload: dict) -> dict:
 
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         mlflow.set_experiment(name)
-        with mlflow.start_run(run_name=f"retrain-{requested_by}") as run:
-            mlflow.log_param("n_estimators", n_estimators)
-            mlflow.log_param("max_depth", max_depth)
-            mlflow.log_param("learning_rate", learning_rate)
+        # The kind and each of its parameters are logged as *params*, because that
+        # is what makes a repeated training recognisable as the same training: the
+        # idempotency lookup in tools.py keys on data_hash + model_kind + params.
+        with mlflow.start_run(run_name=f"retrain-{requested_by}-{kind}") as run:
+            mlflow.log_param("model_kind", kind)
+            for pname, pvalue in params.items():
+                mlflow.log_param(pname, pvalue)
             mlflow.log_param("random_state", RANDOM_STATE)
             mlflow.log_param("test_size", TEST_SIZE)
             mlflow.log_param("requested_by", requested_by)
             mlflow.log_param("dataset", "breast_cancer_wisconsin")
             mlflow.log_param("data_hash", _data_hash(X, y))
+            # The same two metrics for every kind, so the console and the agent's
+            # digest read a version the same way whichever estimator made it.
             mlflow.log_metric("accuracy", acc)
             mlflow.log_metric("roc_auc", auc)
             mlflow.sklearn.log_model(model, artifact_path="model")
@@ -139,11 +156,8 @@ def train_and_register(payload: dict) -> dict:
                 "accuracy": round(acc, 4),
                 "roc_auc": round(auc, 4),
                 "features": int(X.shape[1]),
-                "params": {
-                    "n_estimators": n_estimators,
-                    "max_depth": max_depth,
-                    "learning_rate": learning_rate,
-                },
+                "model_kind": kind,
+                "params": params,
             }
     except Exception as e:
         _capture(e)

@@ -138,11 +138,24 @@ class PromotionWorkflow:
 
 @dataclass
 class TrainingWfInput:
+    """A training request, in the trainer's general shape.
+
+    `model_kind` + `params` is what the activity takes. The three numeric fields
+    are the *console panel's* knobs — the api's `TrainRequest` still sends exactly
+    those, because the panel the operator has is the gradient-boosting one — and
+    they are mapped onto that kind's parameters in `run`. Defaults, not required
+    fields, so a payload from either side deserialises: the agent does not start
+    this workflow (it calls the activity through its own tool), but a future
+    console panel should not need this file changed to offer a second kind.
+    """
+
     model_name: str
-    n_estimators: int
-    max_depth: int
-    learning_rate: float
-    requested_by: str
+    n_estimators: int = 120
+    max_depth: int = 3
+    learning_rate: float = 0.08
+    requested_by: str = "system"
+    model_kind: str = ""
+    params: dict | None = None
 
 
 @workflow.defn
@@ -157,13 +170,17 @@ class TrainingWorkflow:
 
     @workflow.run
     async def run(self, inp: TrainingWfInput) -> dict:
+        params = dict(inp.params or {
+            "n_estimators": inp.n_estimators,
+            "max_depth": inp.max_depth,
+            "learning_rate": inp.learning_rate,
+        })
         return await workflow.execute_activity(
             "train_and_register",
             {
                 "model_name": inp.model_name,
-                "n_estimators": inp.n_estimators,
-                "max_depth": inp.max_depth,
-                "learning_rate": inp.learning_rate,
+                "model_kind": inp.model_kind or "gradient_boosting",
+                "params": params,
                 "requested_by": inp.requested_by,
             },
             # Deliberately low: training is expensive and a bad hyperparameter
