@@ -328,10 +328,23 @@ function InlineConsole({ data, error, call, refresh }) {
         <button
           disabled={!pending}
           title={pending ? `signal ${pending.workflow_id}` : "start a promotion first"}
-          onClick={() =>
-            pending &&
-            call(`/api/models/${pending.version}/approve?workflow_id=${encodeURIComponent(pending.workflow_id)}`)
-          }
+          onClick={async () => {
+            const p = pending;
+            if (!p) return;
+            const res = await call(
+              `/api/models/${p.version}/approve?workflow_id=${encodeURIComponent(p.workflow_id)}`
+            );
+            // The decision is made and the workflow is told, so there is nothing
+            // left to answer: leaving the button live offered to signal a workflow
+            // that had already completed.
+            if (res?.ok) {
+              setPending(null);
+              setNote(`approved v${p.version} — traffic moves to it`);
+              refresh?.();
+            } else {
+              setNote(res?.detail ? `approve refused: ${res.detail}` : "the approve did not go through");
+            }
+          }}
         >
           Approve
         </button>
