@@ -82,6 +82,31 @@ class TestLifecycle(unittest.TestCase):
         self.assertEqual(m.production_version.version_id, "1")
         self.assertEqual(r.weights, {"1": 100})
 
+    def test_rollback_to_the_version_already_serving_keeps_it_live(self):
+        """Re-pinning the incumbent must not demote the version it just marked live.
+
+        `DEMO_INCUMBENT=weakest` picks the same weak incumbent on every reset, so
+        rolling back to the version already serving is the normal path now. The
+        second pass used to overwrite its own assignment — mark the target
+        PRODUCTION, then demote "the previous production pointer", which *was* that
+        target — leaving a production pointer on a version reading STAGING, so the
+        console's version table showed no production version while the router
+        served one. Fails on that behaviour: it asserts the stage, not the pointer.
+        """
+        m = mr.Model("bc")
+        r = rt.RoutingPolicy("bc")
+        lc = orch.ModelLifecycle(registry=m, routing=r, port=FakePort(), event_sink=[])
+        for v in ("1", "2"):
+            lc.register_and_stage(v, f"run-{v}", f"s3://{v}")
+        lc.confirm_approval("1", "wf-1", approved_by="op")
+
+        lc.rollback("1", actor="op")  # back to the version already serving
+        lc.rollback("1", actor="op")  # and again, as a repeated reset does
+
+        self.assertEqual(m.production_version.version_id, "1")
+        self.assertEqual(m.production_version.stage, mr.Stage.PRODUCTION)
+        self.assertEqual(r.weights, {"1": 100})
+
 
 if __name__ == "__main__":
     unittest.main()

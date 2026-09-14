@@ -9,16 +9,58 @@ Three acts. Act 2 is the point; Acts 1 and 3 exist so Act 2 lands.
 
 ---
 
-## Before you start
+## Step 0 — put the incumbent where the win is reachable
 
 ```bash
-./scripts/demo-reset.sh          # clears stale promotions, archives unpromotable versions, reports state
+DEMO_INCUMBENT=weakest ./scripts/demo-reset.sh
 ```
 
-It prints the production version and the candidate the run is likely to propose. If it
-exits non-zero, fix what it names before an audience is watching — the script is the
-only thing standing between you and a demo that starts with a 409 because some earlier
-run left a promotion parked at the gate.
+One command, both jobs: it clears stale promotions, restores `AGENT_FALLBACK=auto`,
+archives unpromotable staging versions, reports the state — and pins the incumbent so
+the gate is reachable today.
+
+**Why a weak incumbent.** The agent proposes only when a candidate genuinely beats the
+version serving production, so against a strong incumbent it does the honest thing and
+*concludes* — "no better candidate" — which is the most convincing behaviour in the demo
+(T01) and also makes the human gate, the demo's climax, unreachable on demand: Acts 2
+and 3 then have nothing to stand on when the presenter needs them. Step 0 buys a
+reachable gate, and it does not buy a rigged one:
+
+- `weakest` picks the version with the **lowest recorded `roc_auc`** among the versions
+  whose artifact is present (`artifact_problem` — the product's own servability rule),
+  and sends traffic to it through the same `POST /api/models/rollback` path
+  `DEMO_INCUMBENT=N` uses.
+- It is picked **by score, not by a magic number**: a real registered version, genuinely
+  worse than the others, and servable. The script prints it beside the **strongest**
+  score, so the size of the gap is on screen rather than in a footnote.
+- The agent still measures real numbers on the held-out split and still decides for
+  itself; nothing about the loop, the tools or the gate changes.
+
+**Say this out loud, because it is the honest framing.** *The win is deliberately set
+up.* The agent is not beating a strong model here — it is finding a better candidate
+than a weak one, which is exactly the comparison a promotion gate exists to make. A
+presenter who skips that sentence invites the room to conclude the agent beat the best
+model in the registry, and it did not.
+
+**What to expect, in order:** the agent reads the registry, scores the incumbent on the
+held-out split, trains a candidate — or, more often than you would guess, finds its
+hyperparameters already registered and reuses that version, because idempotency is keyed
+on the data and the hyperparameters — scores what it found, and, if something beats the
+pinned incumbent, files the promotion and sits at the gate waiting on you. It proposes
+the best thing it has real numbers for, which can be an existing Staging candidate rather
+than a fresh one: in the recorded arc below, both of its training calls reused existing
+versions (v15, v6) and it proposed v41, whose numbers it had just re-measured itself. If
+nothing beats even this incumbent, it concludes honestly instead; that is still a
+legitimate ending, and the retry is to ask again.
+
+A recorded arc with step 0 applied, so the narration has a shape to expect: v18 pinned
+(roc_auc 0.9471, held-out accuracy 0.8860 as the agent re-measured it), 7 steps and 77 s
+of work, one truncated decision absorbed as an observation and a step, and a proposal of
+v41 — 0.9561 accuracy and 0.9914 roc_auc on the *same* split — waiting at the gate.
+
+If the script exits non-zero, fix what it names before an audience is watching — it is
+the only thing standing between you and a demo that starts with a 409 because some
+earlier run left a promotion parked at the gate.
 
 Then open the console, sign in as `operator` / `operator-pass`, and click **Agent**.
 
@@ -37,7 +79,9 @@ That last clause is doing work. The agent is honest, so if nothing beats product
 will **conclude** with "no better candidate" instead of proposing — which is a
 legitimate ending (T01), not a bug, and worth saying out loud if it happens, because it
 is the most convincing thing in the demo. If it happens and you wanted a gate, that is
-your retry: ask again, with the clause above. The script copes with both.
+your retry: ask again, with the clause above. The script copes with both. With step 0's
+weak incumbent it should propose — the honest conclusion is now the fallback rather than
+the default, which is the whole reason step 0 exists.
 
 **Start it, then let the spine fill.** Narrate the loop contract as it does, because the
 panel is showing it: *one step is one brain call, one tool call, one observation — eight
@@ -133,7 +177,8 @@ anywhere.) Keep approving for Act 1 if you want to show a promotion landing; dec
 Act 2 so Act 3 still has something to propose.
 
 If you want the incumbent where you left it, `DEMO_INCUMBENT=7 ./scripts/demo-reset.sh`
-pins production back to v7.
+pins production back to v7. And `DEMO_INCUMBENT=weakest` re-runs step 0, which is what
+you want before the next rehearsal — the gate has to be reachable again.
 
 ---
 
@@ -183,16 +228,18 @@ approve/decline decide the promotion.
 ## Between runs
 
 ```bash
-DEMO_INCUMBENT=7 ./scripts/demo-reset.sh      # optional: pin the incumbent
+DEMO_INCUMBENT=weakest ./scripts/demo-reset.sh   # step 0 again: a reachable gate for the next run
 ```
 
 It terminates anything still pending, archives staging versions whose artifact is gone
 (they can never be promoted, and a run that evaluates one wastes a step finding out),
 leaves alone any version registered in the last three minutes — MLflow creates versions
 asynchronously, so a fresh one can look artifact-less — restores `AGENT_FALLBACK=auto`,
-optionally pins the incumbent, and prints the production version plus the candidates a
-run is likely to choose between. Run it before every rehearsal, not just before the real
-thing: the demo's own state is the easiest thing to leave broken.
+pins the incumbent when asked (an explicit `DEMO_INCUMBENT=N`, or `weakest` for the
+servable version with the lowest recorded `roc_auc`), and prints the pinned version with
+the weakest/strongest scores plus the candidates a run is likely to choose between. Run
+it before every rehearsal, not just before the real thing: the demo's own state is the
+easiest thing to leave broken.
 
 ---
 

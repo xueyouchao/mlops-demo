@@ -105,8 +105,15 @@ class Model:
     def rollback(self, to_version_id: str) -> ModelVersion:
         target = self._versions[to_version_id]
         self._versions[to_version_id] = _with_stage(target, Stage.PRODUCTION)
-        # un-stage the current production pointer (demote to staging)
-        if self._production_pointer and self._production_pointer in self._versions:
+        # un-stage the current production pointer (demote to staging) — but never
+        # when it *is* the target. Rolling back to the version already serving is
+        # now the normal path rather than an oddity: `DEMO_INCUMBENT=weakest`
+        # re-pins the same weak incumbent on every reset, and the second pass
+        # demoted the row it had just marked live, so the pointer named a version
+        # reading STAGING — the console's version table showed no production
+        # version at all while the router was serving one.
+        if (self._production_pointer and self._production_pointer != to_version_id
+                and self._production_pointer in self._versions):
             cur = self._versions[self._production_pointer]
             self._versions[self._production_pointer] = _with_stage(cur, Stage.STAGING)
         self._production_pointer = to_version_id
