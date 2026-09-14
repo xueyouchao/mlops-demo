@@ -73,24 +73,25 @@ fixed = 0
 for v in c.search_model_versions(f"name='{name}'"):
     if v.current_stage != "Staging":
         continue
-    # Use the product's own rule. This script has been wrong twice with a rule of
-    # its own — once reading `source` as a filesystem path, once disagreeing with
-    # `artifact_problem` about seven perfectly servable versions — so it asks the
-    # thing that actually serves models instead of inventing a second opinion.
+    # Use the product's own rule, and branch on it. This block has now been wrong
+    # three times: first reading `source` as a filesystem path, then disagreeing
+    # with `artifact_problem` about thirty-two servable versions, and then -- after
+    # both were "fixed" -- stitching an `if present:` header out of existence, so
+    # `present` was computed and never read and the archive branch ran for every
+    # staging version while printing "artifact MISSING" without checking anything.
     import os
+    import time
     from ml_platform.registry_health import artifact_problem
     problem = artifact_problem(os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
                                name, str(v.version))
-    present = not problem
     # MLflow creates model versions asynchronously ("waiting up to 300 seconds for
     # model version to finish creation"), so a version registered seconds ago can
-    # look artifact-less and get archived by mistake. Never judge a fresh one.
-    import time
+    # look artifact-less. Never judge a fresh one.
     age_ms = int(time.time() * 1000) - int(v.creation_timestamp or 0)
-    if age_ms < 180_000:
-        print(f"  v{v.version} staging, created {age_ms // 1000}s ago — too new to judge, left alone")
-        continue
+    if not problem:
         print(f"  v{v.version} staging, artifact present — promotable")
+    elif age_ms < 180_000:
+        print(f"  v{v.version} staging, created {age_ms // 1000}s ago — too new to judge, left alone")
     else:
         c.transition_model_version_stage(name, int(v.version), "Archived")
         print(f"  v{v.version} staging, artifact MISSING -> archived (it could only fail on promote)")
