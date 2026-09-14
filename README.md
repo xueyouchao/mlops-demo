@@ -139,8 +139,31 @@ Bounded contexts communicate **only** through domain events — which double as 
 ## Run the demo
 
 ```bash
-./scripts/demo-reset.sh     # clean state, then open the console and the Agent tab
+DEMO_INCUMBENT=weakest ./scripts/demo-reset.sh   # clean state + step 0 (below)
 ```
+
+That is the reset **and** step 0 of the demo in one command: it clears promotions parked
+at the gate, restores `AGENT_FALLBACK=auto`, archives unpromotable staging versions, and
+pins the incumbent.
+
+**Step 0, and why it exists.** The investigation agent proposes a promotion only when a
+candidate genuinely beats the version serving production — so against a strong incumbent
+it honestly concludes *"no better candidate"* and never reaches the human gate, which is
+the demo's climax. `DEMO_INCUMBENT=weakest` picks the **servable version with the lowest
+recorded `roc_auc`** (the number its own training run logged on the held-out split the
+evaluator reuses) and sends traffic to it through the same `POST /api/models/rollback`
+path `DEMO_INCUMBENT=7` uses: a real registered version, genuinely worse, chosen by score
+rather than by a magic number. The script prints the pinned version beside the strongest
+score, so the setup is on screen.
+
+**Say plainly that the win is set up.** The agent is not beating a strong model here; it
+is finding a better candidate than a weak one — the comparison a promotion gate exists to
+make. Nothing about the loop, the tools or the gate changes: expect the agent to read the
+registry, evaluate the incumbent, train or reuse a candidate (idempotency means a repeat
+of the same training returns the existing version), and file the best candidate it has
+real numbers for — an existing Staging version included — then wait at the gate for your
+decision. If nothing beats even that incumbent, it concludes honestly instead, which is a
+legitimate ending rather than a bug.
 
 The script, the narration and the numbers are in
 [`docs/demo-script.md`](docs/demo-script.md). Run the reset before every rehearsal:
