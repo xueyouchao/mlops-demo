@@ -17,10 +17,10 @@ train → register (MLflow) → promote (Temporal, human-approval gate)
 [ui]       single-origin gateway + harness shell (React/Vite)   ── :8082
 [api]      FastAPI: auth (JWT HttpOnly) + lifecycle facade       ── :8000
 [serving]  FastAPI: canary/blue-green router + real model inference  ── :8001
-[worker]   Temporal worker: activities, train/promote/rollback wf
+[worker]   Temporal worker: promotion/training/investigation wf + activities
 [mlflow]   model registry  (train → register → stage)
 [temporal] durable orchestration (human-approval gate)
-[postgres] shared state (users + registry/metadata)
+[postgres] Temporal's persistence store (workflow history + visibility)
 ```
 
 ### Single-origin gateway ("harness")
@@ -32,7 +32,8 @@ frame/cookie policies just work:
 
 | Tab (sidebar) | Served how |
 |---|---|
-| **Ops Console** | inline React (versions, stages, routing, **train/retrain**, **predict**, promote/approve/rollback, audit) |
+| **Ops Console** | inline React (versions, stages, routing, **train/retrain**, **predict**, the gate's three buttons — *Start a promotion (goes to the gate)* / **Approve** / *Send traffic now (override)* — and the audit trail) |
+| **Investigation Agent** | inline React (start a run, its transcript, the promotion it proposes at the same gate) |
 | **Diagrams** (architecture / agent / workflow / lifecycle / sequence / dataflow) | static `diagrams/*.html` (Archify, `<meta animation="trace">`) |
 | **Temporal UI** | reverse-proxied `/temporal/` (Temporal `publicPath=/temporal/`) |
 | **MLflow UI** | reverse-proxied `/mlflow/` (prefix-strip; hash-routed app) |
@@ -78,9 +79,13 @@ immutable by design, so a retrain is always a new version number.
 
 **Flow to demo:**
 1. Sign in to the console → you'll see the version staged as **Staging**.
-2. Click **Promote** → the Temporal workflow starts and *waits* for approval.
+2. Click **Start a promotion (goes to the gate)** → the Temporal workflow starts
+   and *waits* for approval.
 3. Click **Approve** → the version transitions to **Production** (identity recorded).
-4. Use the **Rollback** button to blue-green flip back to a prior version.
+4. **Send traffic now (override)** moves 100% of traffic to the version in the box
+   immediately: it bypasses the approval gate and is *not* recorded as a promotion.
+   A version that cannot serve (its artifact is gone) is refused with 409, on this
+   path as well as on promote.
 5. Call **serving** (`POST /v1/predict`) to see canary weighting route to versions.
 6. Retrain with different hyperparameters, promote the new version, and predict
    again — the served version and its output change, because serving loads the
@@ -146,7 +151,9 @@ is gone) is the easiest thing to leave broken.
 ## Run the tests
 
 ```bash
-python3 -m unittest tests.test_domain -v
+python3 -m unittest tests.test_domain -v     # domain core: aggregate, routing, lifecycle
+python3 services/worker/test_brain.py        # the agent's brain; the last group calls the
+                                             # real model, so it needs ollama on the host
 ```
 
 ## Environment variables
@@ -154,6 +161,7 @@ python3 -m unittest tests.test_domain -v
 | Var | Default | Note |
 |---|---|---|
 | `SENTRY_DSN` | *(empty)* | Set a real DSN to enable Sentry capture |
+| `SENTRY_TRACES_SAMPLE_RATE` | `1.0` | Worker only: sample rate for the agent's LLM spans (the api keeps its own `0.25`) |
 | `JWT_SECRET` | `change-me-in-prod` | **Set this.** Signs the auth JWT |
 | `SEED_OPERATOR_PASSWORD` / `SEED_ADMIN_PASSWORD` | dev presets | Seed logins |
 
@@ -179,7 +187,7 @@ confirmed green:
 | MLflow registry | (Temporal activity) | `v1: stage=Production` ✅ |
 | Serving predict | `POST /v1/predict` (30 features) | routes on `{"1":100}`, real artifact |
 | Retrain from console | `POST /api/models/train` | TrainingWorkflow → new version in Staging |
-| Rollback (blue-green) | `POST /api/models/rollback` | 200 → v1 |
+| Rollback (blue-green) | `POST /api/models/rollback` | 200 → the prior servable version (`v1` is refused with **409**: its artifact is gone) |
 | Audit trail | `GET /api/models/events` | register/promote/approve/rollback events |
 
 The human-approval **gate is real**: `promote` starts a Temporal workflow that

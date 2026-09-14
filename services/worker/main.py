@@ -29,11 +29,24 @@ TEMPORAL_PORT = int(os.getenv("TEMPORAL_PORT", "7233"))
 
 SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 
+# Tracing, not just error capture. The worker is where the agent's brain runs,
+# and until this was set it produced no span at all: `sentry_sdk.init` without a
+# sample rate means every span `brain.py` opens is created, finished, and then
+# dropped at the transport — so Sentry's LLM views had nothing to read even once
+# the model call was instrumented. A demo makes a handful of calls per run, so
+# the default keeps all of them; `SENTRY_TRACES_SAMPLE_RATE=0` turns it off
+# without touching the code. The api keeps its own, separate 0.25.
+SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "1.0"))
+
 
 async def main() -> None:
     if SENTRY_DSN:
         import sentry_sdk
-        sentry_sdk.init(dsn=SENTRY_DSN, environment=os.getenv("SENTRY_ENV", "development"))
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            environment=os.getenv("SENTRY_ENV", "development"),
+            traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+        )
 
     client = await Client.connect(f"{TEMPORAL_HOST}:{TEMPORAL_PORT}")
     worker = Worker(
