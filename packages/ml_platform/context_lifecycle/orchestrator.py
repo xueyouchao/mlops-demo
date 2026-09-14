@@ -69,10 +69,15 @@ class ModelLifecycle:
         ))
 
     def rollback(self, to_version_id: str, actor: str = "system"):
+        # Read the displaced version *before* the move: `registry.rollback` moves the
+        # production pointer itself, so asking afterwards answered with the target,
+        # and the audit event could never name what it displaced — the console
+        # prints these events verbatim, so it printed the same id on both sides.
+        displaced = self.registry.production_version
         self.registry.rollback(to_version_id)
         self.routing.rollback_to(to_version_id)
         self.event_sink.append(ev.ModelRolledBack(
             version_id=to_version_id, model_name=self.registry.name,
-            previous_version_id=self.registry.production_version.version_id if self.registry.production_version else "",
+            previous_version_id=displaced.version_id if displaced else "",
             actor=actor,
         ))

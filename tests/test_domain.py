@@ -54,6 +54,34 @@ class TestLifecycle(unittest.TestCase):
         self.assertIn("PromotionApprovalRequested", names)
         self.assertIn("ModelPromotedToProduction", names)
 
+    def test_rollback_event_names_the_displaced_version(self):
+        """The audit event must name what the rollback *displaced*, not the target.
+
+        `registry.rollback` moves the production pointer itself, so a
+        `previous_version_id` read after the move returns the target version —
+        every rollback then recorded "moved from v1 to v1", which is what the
+        console prints verbatim. Fails on that behaviour: it asserts v2.
+        """
+        m = mr.Model("bc")
+        r = rt.RoutingPolicy("bc")
+        out = []
+        lc = orch.ModelLifecycle(registry=m, routing=r, port=FakePort(), event_sink=out)
+        for v in ("1", "2"):
+            lc.register_and_stage(v, f"run-{v}", f"s3://{v}")
+        # v1 goes live, then v2 displaces it — so v1 is the version a later
+        # rollback back to v1 has to name as the one it displaced.
+        lc.confirm_approval("1", "wf-1", approved_by="op")
+        lc.confirm_approval("2", "wf-2", approved_by="op")
+
+        lc.rollback("1", actor="op")
+
+        event = out[-1]
+        self.assertEqual(type(event).__name__, "ModelRolledBack")
+        self.assertEqual(event.version_id, "1")
+        self.assertEqual(event.previous_version_id, "2")
+        self.assertEqual(m.production_version.version_id, "1")
+        self.assertEqual(r.weights, {"1": 100})
+
 
 if __name__ == "__main__":
     unittest.main()

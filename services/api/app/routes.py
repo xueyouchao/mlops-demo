@@ -10,7 +10,7 @@ from ml_platform.registry_health import artifact_problem
 from . import security
 from .config import get_settings
 from .security import require_role
-from .registry_sync import sync_from_registry
+from .registry_sync import stage_version, sync_from_registry
 from .serving_client import sync_rollback, sync_routing
 from .state import state
 from .temporal_port import PromotionAlreadyPending
@@ -162,6 +162,18 @@ def rollback(to_version_id: str, user=Depends(require_role("operator", "admin"))
     # and one click put production on v1, whose artifact is gone — the exact
     # failure _assert_servable's docstring describes, through the other door.
     _assert_servable(to_version_id)
+    # The stage has to follow the traffic on this path too: MLflow is the registry
+    # of record, and this route moves production with no workflow behind it (unlike
+    # promote, whose `promote_stage` activity writes the stage). Without it the
+    # displaced version kept wearing Production while serving 0% — the console read
+    # back two production rows. Written *before* the move so a registry that
+    # refuses leaves traffic where it is rather than half-moved.
+    try:
+        stage_version(to_version_id)
+    except Exception:
+        raise HTTPException(
+            502, f"could not move version {to_version_id} to Production in the registry"
+        )
     _lc().rollback(to_version_id, actor=user["username"])
     sync_rollback(to_version_id)
     return {"ok": True, "rolled_back_to": to_version_id}

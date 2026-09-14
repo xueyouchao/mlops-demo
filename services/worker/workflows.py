@@ -173,20 +173,6 @@ class TrainingWorkflow:
         )
 
 
-@workflow.defn
-class RollbackWorkflow:
-    """Rollback to the previous registered version (blue-green flip)."""
-
-    @workflow.run
-    async def run(self, payload: dict) -> dict:
-        await workflow.execute_activity(
-            "rollback_stage", payload,
-            retry_policy=RetryPolicy(maximum_attempts=3),
-            start_to_close_timeout=timedelta(seconds=30),
-        )
-        return {"rolled_back": True}
-
-
 # --------------------------------------------------------------------------
 # The investigation agent
 # --------------------------------------------------------------------------

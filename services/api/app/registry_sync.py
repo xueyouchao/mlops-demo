@@ -9,6 +9,10 @@ nothing ever read MLflow back).
 The sync is additive and best-effort: it never overwrites a version the running
 process already knows about, and an unreachable MLflow degrades the console to
 in-memory state rather than failing the request.
+
+This module is also the api's one *writer* to the registry (see `stage_version`):
+the rollback route moves production synchronously, with no workflow behind it, so
+the stage has to be written here for the stage to follow the traffic.
 """
 from __future__ import annotations
 
@@ -48,6 +52,30 @@ def _records() -> list[tuple[str, str, str, Stage]]:
     ]
     records.sort(key=lambda r: int(r[0]) if r[0].isdigit() else 0)
     return records
+
+
+def stage_version(version_id: str, stage: str = "Production") -> None:
+    """Move a version's MLflow stage, archiving whatever it displaces.
+
+    Promotion's stage is written by the worker's `promote_stage` activity; the
+    rollback route moves production itself, synchronously and with no workflow
+    behind it, and it used to write nothing — so the version it displaced kept
+    the Production stage while serving none of the traffic, and every reader of
+    the registry of record (the console's read-back, the MLflow UI) showed two
+    production versions with one of them at 0%.
+
+    `archive_existing_versions=True` is exactly what the promote path passes:
+    MLflow's stages are not exclusive unless you ask, which is the whole bug.
+
+    Raises on a registry that refuses the transition, deliberately: the caller is
+    about to point live traffic at this version, and a swallowed failure here is
+    the stage and the traffic disagreeing again, silently.
+    """
+    MlflowClient(
+        tracking_uri=get_settings().mlflow_tracking_uri
+    ).transition_model_version_stage(
+        state.model.name, int(version_id), stage, archive_existing_versions=True
+    )
 
 
 def sync_from_registry() -> int:
