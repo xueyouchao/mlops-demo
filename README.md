@@ -33,7 +33,7 @@ frame/cookie policies just work:
 | Tab (sidebar) | Served how |
 |---|---|
 | **Ops Console** | inline React (versions, stages, routing, **train/retrain**, **predict**, promote/approve/rollback, audit) |
-| **Diagrams** (architecture / workflow / lifecycle / sequence / dataflow) | static `diagrams/*.html` (Archify, `<meta animation="trace">`) |
+| **Diagrams** (architecture / agent / workflow / lifecycle / sequence / dataflow) | static `diagrams/*.html` (Archify, `<meta animation="trace">`) |
 | **Temporal UI** | reverse-proxied `/temporal/` (Temporal `publicPath=/temporal/`) |
 | **MLflow UI** | reverse-proxied `/mlflow/` (prefix-strip; hash-routed app) |
 | **API Docs** | FastAPI Swagger at `/docs` + `/openapi.json` |

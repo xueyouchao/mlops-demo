@@ -4,55 +4,348 @@
   "meta": {
     "title": "mlops-demo ML Lifecycle Platform",
     "output": "diagrams/architecture.html",
-    "viewBox": [1140, 660],
+    "viewBox": [
+      1140,
+      660
+    ],
     "animation": "trace",
     "quality_profile": "showcase",
     "views": [
       {
         "id": "control-plane",
         "label": "Lifecycle control plane",
-        "focus": ["browser", "ui", "api"],
+        "focus": [
+          "browser",
+          "ui",
+          "api"
+        ],
         "note": "The operator, console, and the FastAPI facade that drives the lifecycle."
       },
       {
         "id": "orchestration",
         "label": "Durable orchestration",
-        "focus": ["temporal", "worker", "mlflow"],
+        "focus": [
+          "temporal",
+          "worker",
+          "mlflow"
+        ],
         "note": "The workflow engine, its worker, and the registry state they mutate."
       },
       {
         "id": "serving",
         "label": "Routing and state",
-        "focus": ["api", "serving", "postgres"],
+        "focus": [
+          "api",
+          "serving",
+          "postgres"
+        ],
         "note": "Weight sync to serving and user state in Postgres."
+      },
+      {
+        "id": "investigation-agent",
+        "label": "The investigation agent",
+        "focus": [
+          "ui",
+          "agentpanel",
+          "api",
+          "temporal",
+          "worker",
+          "investigation"
+        ],
+        "note": "The console panel reads a projection of the agent run's event history."
       }
     ]
   },
   "components": [
-    { "id": "browser", "type": "external", "label": "Operator", "sublabel": "admin console", "pos": [40, 300], "size": [128, 62] },
-    { "id": "ui", "type": "frontend", "label": "Ops Console", "sublabel": "React / Vite :8082", "pos": [220, 300], "size": [150, 62] },
-    { "id": "api", "type": "security", "label": "API Facade", "sublabel": "FastAPI :8000", "tag": "JWT HttpOnly", "pos": [430, 300], "size": [158, 62] },
-    { "id": "temporal", "type": "messagebus", "label": "Temporal", "sublabel": "durable orchestration :7233", "tag": "approval gate", "pos": [680, 120], "size": [150, 62] },
-    { "id": "worker", "type": "backend", "label": "Temporal Worker", "sublabel": "promote / rollback activities", "pos": [680, 300], "size": [150, 62] },
-    { "id": "mlflow", "type": "database", "label": "MLflow Registry", "sublabel": "model registry :5000", "tag": "source of truth", "pos": [680, 480], "size": [150, 62] },
-    { "id": "serving", "type": "backend", "label": "Serving Router", "sublabel": "FastAPI :8001", "tag": "canary + blue-green", "pos": [430, 510], "size": [158, 62] },
-    { "id": "postgres", "type": "database", "label": "PostgreSQL", "sublabel": "users + metadata :5432", "pos": [900, 300], "size": [150, 62] }
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "Operator",
+      "sublabel": "admin console",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        128,
+        62
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "Ops Console",
+      "sublabel": "React / Vite :8082",
+      "pos": [
+        220,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "api",
+      "type": "security",
+      "label": "API Facade",
+      "sublabel": "FastAPI :8000",
+      "tag": "JWT HttpOnly",
+      "pos": [
+        430,
+        300
+      ],
+      "size": [
+        158,
+        62
+      ]
+    },
+    {
+      "id": "temporal",
+      "type": "messagebus",
+      "label": "Temporal",
+      "sublabel": "durable orchestration :7233",
+      "tag": "approval gate",
+      "pos": [
+        680,
+        120
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Temporal Worker",
+      "sublabel": "promote / rollback / investigate",
+      "pos": [
+        680,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "mlflow",
+      "type": "database",
+      "label": "MLflow Registry",
+      "sublabel": "model registry :5000",
+      "tag": "source of truth",
+      "pos": [
+        680,
+        480
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "serving",
+      "type": "backend",
+      "label": "Serving Router",
+      "sublabel": "FastAPI :8001",
+      "tag": "canary + blue-green",
+      "pos": [
+        430,
+        510
+      ],
+      "size": [
+        158,
+        62
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "users + metadata :5432",
+      "pos": [
+        900,
+        300
+      ],
+      "size": [
+        150,
+        62
+      ]
+    },
+    {
+      "id": "agentpanel",
+      "type": "frontend",
+      "label": "Agent Panel",
+      "sublabel": "investigation console",
+      "pos": [
+        220,
+        205
+      ],
+      "size": [
+        158,
+        62
+      ]
+    },
+    {
+      "id": "investigation",
+      "type": "messagebus",
+      "label": "InvestigationWorkflow",
+      "sublabel": "flat ReAct loop",
+      "tag": "8-step cap",
+      "pos": [
+        900,
+        120
+      ],
+      "size": [
+        170,
+        62
+      ]
+    }
   ],
   "boundaries": [
     {
       "kind": "region",
       "label": "docker-compose mlops-demo",
-      "wraps": ["ui", "api", "serving", "worker", "temporal", "mlflow", "postgres"]
+      "wraps": [
+        "ui",
+        "api",
+        "serving",
+        "worker",
+        "temporal",
+        "mlflow",
+        "postgres",
+        "agentpanel",
+        "investigation"
+      ]
     }
   ],
   "connections": [
-    { "from": "browser", "to": "ui", "label": "HTTPS", "variant": "emphasis" },
-    { "from": "ui", "to": "api", "label": "auth + lifecycle", "labelAt": [400, 376] },
-    { "from": "api", "to": "temporal", "label": "start workflow / signal", "variant": "emphasis", "route": "orthogonal-h", "fromSide": "top", "toSide": "bottom", "via": [[509, 220], [755, 220], [755, 182]] },
-    { "from": "temporal", "to": "worker", "label": "dispatch activity", "fromSide": "bottom", "toSide": "top", "via": [[755, 240]] },
-    { "from": "worker", "to": "mlflow", "label": "transition stage", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "via": [[755, 420]] },
-    { "from": "api", "to": "serving", "label": "sync routing", "variant": "dashed", "fromSide": "bottom", "toSide": "top", "labelAt": [535, 376] },
-    { "from": "api", "to": "postgres", "label": "users", "variant": "dashed", "fromSide": "right", "toSide": "bottom", "via": [[588, 331], [655, 331], [655, 590], [975, 590], [975, 362]] }
+    {
+      "from": "browser",
+      "to": "ui",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "from": "ui",
+      "to": "api",
+      "label": "auth + lifecycle",
+      "labelAt": [
+        400,
+        376
+      ]
+    },
+    {
+      "from": "api",
+      "to": "temporal",
+      "label": "start workflow / signal",
+      "variant": "emphasis",
+      "route": "orthogonal-h",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          509,
+          220
+        ],
+        [
+          755,
+          220
+        ],
+        [
+          755,
+          182
+        ]
+      ]
+    },
+    {
+      "from": "temporal",
+      "to": "worker",
+      "label": "dispatch activity",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          755,
+          240
+        ]
+      ]
+    },
+    {
+      "from": "worker",
+      "to": "mlflow",
+      "label": "transition stage",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          755,
+          420
+        ]
+      ]
+    },
+    {
+      "from": "api",
+      "to": "serving",
+      "label": "sync routing",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        535,
+        376
+      ]
+    },
+    {
+      "from": "api",
+      "to": "postgres",
+      "label": "users",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          588,
+          331
+        ],
+        [
+          655,
+          331
+        ],
+        [
+          655,
+          590
+        ],
+        [
+          975,
+          590
+        ],
+        [
+          975,
+          362
+        ]
+      ]
+    },
+    {
+      "from": "api",
+      "to": "agentpanel",
+      "label": "run projection",
+      "variant": "emphasis",
+      "labelDy": 10
+    },
+    {
+      "from": "worker",
+      "to": "investigation",
+      "label": "hosts",
+      "variant": "dashed"
+    },
+    {
+      "from": "temporal",
+      "to": "investigation",
+      "variant": "dashed"
+    }
   ],
   "cards": [
     {
@@ -61,7 +354,8 @@
       "items": [
         "Operator triggers promote through the React console",
         "FastAPI facade signs-in via JWT in an HttpOnly cookie",
-        "API starts a durable Temporal workflow that waits on approval"
+        "API starts a durable Temporal workflow that waits on approval",
+        "The console's agent panel reads a projection of the run's event history"
       ]
     },
     {
@@ -70,7 +364,8 @@
       "items": [
         "Temporal workflow waits on the approval signal",
         "Worker activity transitions the MLflow stage",
-        "MLflow registry is the stage source of truth"
+        "MLflow registry is the stage source of truth",
+        "The worker also hosts InvestigationWorkflow, the agent's flat ReAct loop"
       ]
     },
     {

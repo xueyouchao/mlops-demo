@@ -1,0 +1,418 @@
+{
+ "schema_version": 1,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "Durable Investigation Agent",
+  "output": "diagrams/agent.html",
+  "animation": "trace",
+  "quality_profile": "showcase",
+  "views": [
+   {
+    "id": "the-loop",
+    "label": "One step of the loop",
+    "focus": [
+     "goal",
+     "loop",
+     "brain",
+     "toolcall"
+    ],
+    "note": "One brain call, exactly one tool call, one observation - every step is recorded."
+   },
+   {
+    "id": "the-gate",
+    "label": "The human gate",
+    "focus": [
+     "toolcall",
+     "promotion",
+     "operator",
+     "endings"
+    ],
+    "note": "propose_promotion starts a durable promotion that waits for a person."
+   },
+   {
+    "id": "crash-and-resume",
+    "label": "Crash and resume",
+    "focus": [
+     "loop",
+     "history",
+     "panel",
+     "frozen"
+    ],
+    "note": "A killed worker freezes the run; the event history carries it back."
+   }
+  ]
+ },
+ "lanes": [
+  {
+   "id": "console",
+   "label": "Operator console"
+  },
+  {
+   "id": "history",
+   "label": "Event history"
+  },
+  {
+   "id": "agent",
+   "label": "Temporal workflow"
+  },
+  {
+   "id": "brain",
+   "label": "Brain activity"
+  },
+  {
+   "id": "tools",
+   "label": "Tool activities"
+  },
+  {
+   "id": "gate",
+   "label": "Promotion gate"
+  },
+  {
+   "id": "exceptions",
+   "label": "Failure + resume",
+   "variant": "exception"
+  }
+ ],
+ "phases": [
+  {
+   "id": "ask",
+   "label": "Ask",
+   "fromCol": 0,
+   "toCol": 1
+  },
+  {
+   "id": "decide",
+   "label": "Decide + propose",
+   "fromCol": 2,
+   "toCol": 3,
+   "variant": "emphasis"
+  },
+  {
+   "id": "gate",
+   "label": "Human gate + ending",
+   "fromCol": 4,
+   "toCol": 5,
+   "variant": "security"
+  }
+ ],
+ "groups": [
+  {
+   "id": "human_gate",
+   "label": "Durable human gate",
+   "lane": "gate",
+   "fromCol": 3,
+   "toCol": 5,
+   "variant": "security"
+  }
+ ],
+ "mainPath": [
+  "goal",
+  "loop",
+  "brain",
+  "toolcall",
+  "promotion",
+  "operator",
+  "endings"
+ ],
+ "nodes": [
+  {
+   "id": "goal",
+   "lane": "console",
+   "col": 0,
+   "type": "frontend",
+   "label": "Goal",
+   "sublabel": "the ask",
+   "tag": "operator",
+   "width": 92
+  },
+  {
+   "id": "panel",
+   "lane": "console",
+   "col": 2,
+   "type": "frontend",
+   "label": "Agent Panel",
+   "sublabel": "run console",
+   "width": 112
+  },
+  {
+   "id": "history",
+   "lane": "history",
+   "col": 2,
+   "type": "database",
+   "label": "Event History",
+   "sublabel": "only record",
+   "width": 120
+  },
+  {
+   "id": "loop",
+   "lane": "agent",
+   "col": 1,
+   "type": "messagebus",
+   "label": "InvestigationWorkflow",
+   "sublabel": "flat ReAct loop",
+   "tag": "durable",
+   "width": 168
+  },
+  {
+   "id": "brain",
+   "lane": "brain",
+   "col": 2,
+   "type": "cloud",
+   "label": "brain_decide",
+   "sublabel": "ollama deepseek-v4.1-flash:cloud",
+   "tag": "stateless",
+   "width": 130
+  },
+  {
+   "id": "toolcall",
+   "lane": "tools",
+   "col": 3,
+   "type": "backend",
+   "label": "One Tool Call",
+   "sublabel": "exactly one per step",
+   "tag": "six activities",
+   "width": 132
+  },
+  {
+   "id": "promotion",
+   "lane": "gate",
+   "col": 3,
+   "type": "messagebus",
+   "label": "PromotionWorkflow",
+   "sublabel": "waits for a human",
+   "tag": "wait_condition",
+   "width": 116
+  },
+  {
+   "id": "operator",
+   "lane": "gate",
+   "col": 5,
+   "type": "security",
+   "label": "Human Decision",
+   "sublabel": "approve or decline",
+   "tag": "signal",
+   "width": 104
+  },
+  {
+   "id": "endings",
+   "lane": "exceptions",
+   "col": 5,
+   "type": "backend",
+   "label": "Run Ending",
+   "sublabel": "reason recorded",
+   "tag": "four reasons",
+   "width": 104
+  },
+  {
+   "id": "frozen",
+   "lane": "exceptions",
+   "col": 1,
+   "type": "backend",
+   "label": "Killed Worker",
+   "sublabel": "frozen, not lost",
+   "tag": "at-least-once",
+   "width": 112
+  }
+ ],
+ "edges": [
+  {
+   "id": "start",
+   "from": "goal",
+   "to": "loop",
+   "label": "start run",
+   "variant": "emphasis",
+   "route": "drop",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "decide",
+   "from": "loop",
+   "to": "brain",
+   "label": "brain call",
+   "variant": "emphasis",
+   "route": "drop",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelSegment": 1,
+   "labelDy": 16
+  },
+  {
+   "id": "act",
+   "from": "brain",
+   "to": "toolcall",
+   "label": "one tool call",
+   "variant": "emphasis",
+   "route": "drop",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelSegment": 1,
+   "labelDy": 16
+  },
+  {
+   "id": "observe",
+   "from": "toolcall",
+   "to": "brain",
+   "label": "observation",
+   "variant": "dashed",
+   "role": "return",
+   "route": "outside-right",
+   "fromSide": "right",
+   "toSide": "right",
+   "labelSegment": 1,
+   "labelDx": -60
+  },
+  {
+   "id": "propose",
+   "from": "toolcall",
+   "to": "promotion",
+   "label": "propose_promotion",
+   "variant": "security",
+   "role": "branch",
+   "route": "straight",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelDy": 30
+  },
+  {
+   "id": "wait",
+   "from": "promotion",
+   "to": "operator",
+   "label": "waits on",
+   "variant": "security",
+   "role": "main",
+   "route": "straight",
+   "fromSide": "right",
+   "toSide": "left"
+  },
+  {
+   "id": "verdict",
+   "from": "operator",
+   "to": "endings",
+   "label": "verdict",
+   "variant": "security",
+   "role": "main",
+   "route": "straight",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "labelDy": 40
+  },
+  {
+   "id": "record",
+   "from": "loop",
+   "to": "history",
+   "label": "every step",
+   "variant": "dashed",
+   "role": "branch",
+   "fromSide": "top",
+   "toSide": "bottom",
+   "via": [
+    [
+     220,
+     290
+    ],
+    [
+     300,
+     290
+    ]
+   ],
+   "labelSegment": 1,
+   "labelDy": 6
+  },
+  {
+   "id": "project",
+   "from": "history",
+   "to": "panel",
+   "label": "projection",
+   "variant": "dashed",
+   "role": "branch",
+   "route": "straight",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "kill",
+   "from": "loop",
+   "to": "frozen",
+   "label": "worker killed",
+   "variant": "dashed",
+   "role": "error",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "route": "straight",
+   "labelDy": 210
+  },
+  {
+   "id": "resume",
+   "from": "frozen",
+   "to": "loop",
+   "label": "resumes, retried",
+   "variant": "emphasis",
+   "role": "return",
+   "route": "return-left",
+   "fromSide": "left",
+   "toSide": "left",
+   "channelX": 20,
+   "labelSegment": 1,
+   "labelDx": 70,
+   "labelDy": 6
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "The Loop Contract",
+   "items": [
+    "One step is one brain call, exactly one tool call, one observation",
+    "The cap is 8 steps; an activity retry does not consume a step, a malformed decision does",
+    "The 6-minute ceiling sums per-step work, each step capped at 2 minutes, minus the human wait",
+    "The brain is stateless: the transcript is the whole state",
+    "Four ways to end: concluded, budget_exhausted, no_progress, failed"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "The Brain",
+   "items": [
+    "brain_decide asks ollama for deepseek-v4.1-flash:cloud",
+    "AGENT_FALLBACK=on always runs the deterministic scripted policy",
+    "AGENT_FALLBACK=auto uses the model and falls back when it is unreachable",
+    "AGENT_FALLBACK=off uses the model only and fails the run when it is down"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "The Six Tools",
+   "items": [
+    "read_registry - versions and the stage that serves",
+    "read_run_metrics - the run's own recorded metrics",
+    "evaluate_version - scores a version against the incumbent",
+    "train_candidate - trains a candidate; a repeat is idempotent",
+    "propose_promotion - files the durable promotion and waits",
+    "conclude - ends the run with an answer"
+   ]
+  },
+  {
+   "dot": "rose",
+   "title": "The Human Gate",
+   "items": [
+    "propose_promotion files PromotionWorkflow through the promotion_outcome activity",
+    "Approve promotes in the MLflow registry of record and routing moves traffic",
+    "Decline completes with promoted: false; traffic does not move",
+    "Terminate the promotion while the agent waits and the run records a failure",
+    "Promotion and rollback both check the artifact before traffic moves"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Durability",
+   "items": [
+    "Kill the worker and the run resumes from its event history",
+    "An interrupted activity is retried, so it runs again (at-least-once)",
+    "The console shows the frozen step with a running clock: frozen, not lost",
+    "schedule_to_start_timeout is bounded at 10 minutes; unbounded, a task stranded on a dead worker hangs for ever",
+    "That timeout counts as a failed attempt, so too tight a bound turns a short outage into a dead run"
+   ]
+  }
+ ]
+}
