@@ -32,7 +32,7 @@ frame/cookie policies just work:
 
 | Tab (sidebar) | Served how |
 |---|---|
-| **Ops Console** | inline React (versions, stages, routing, **train/retrain**, **predict**, the gate's three buttons — *Start a promotion (goes to the gate)* / **Approve** / *Send traffic now (override)* — and the audit trail) |
+| **Ops Console** | inline React (versions — with the estimator family that produced each — stages, routing, **train/retrain** with a family selector, **predict**, the gate's three buttons — *Start a promotion (goes to the gate)* / **Approve** / *Send traffic now (override)* — and the audit trail) |
 | **Investigation Agent** | inline React (start a run, its transcript, the promotion it proposes at the same gate) |
 | **Diagrams** (architecture / agent / workflow / lifecycle / sequence / dataflow) | static `diagrams/*.html` (Archify, `<meta animation="trace">`) |
 | **Temporal UI** | reverse-proxied `/temporal/` (Temporal `publicPath=/temporal/`) |
@@ -66,19 +66,30 @@ Then:
 ```bash
 docker compose --profile tools run --rm trainer
 ```
-This trains a GradientBoosting classifier on Breast Cancer Wisconsin, logs the
-run + lineage (data hash, dataset, params) to MLflow, registers a version, and
-auto-stages it (awaiting the human production gate).
+This seed trainer trains a **GradientBoosting** classifier on Breast Cancer
+Wisconsin, logs the run + lineage (data hash, dataset, params) to MLflow,
+registers a version, and auto-stages it (awaiting the human production gate). It
+is the one entry point that stays **gradient-boosting only** — it has no family
+selector, and it does not pretend to have one.
 
 **Or retrain from the console:** the **Ops Console** has a *Train a candidate*
-panel — set `n_estimators` / `max_depth` / `learning_rate` and click
-**Train & register**. That runs the same work as a durable `TrainingWorkflow` on
-the worker (no `tools` profile, no shell), and the new version lands in
-**Staging**. Training never edits an existing version — `ModelVersion` is
-immutable by design, so a retrain is always a new version number.
+panel — pick an estimator family (`gradient_boosting` or `logistic_regression`)
+and set **that** family's parameters — `n_estimators` / `max_depth` /
+`learning_rate`, or `C` / `max_iter` — then click **Train & register**. The inputs
+are generated from the trainer's own definitions (below), so the panel can only
+offer parameters the trainer accepts. That runs the same work as a durable
+`TrainingWorkflow` on the worker (no `tools` profile, no shell), and the new
+version lands in **Staging**. Training never edits an existing version —
+`ModelVersion` is immutable by design, so a retrain is always a new version
+number.
+
+So the seed script and the console panel reach the **same trainer** but do not
+offer the same choice: the console panel picks an estimator family, the seed
+script is gradient-boosting only. See *Two estimator families, one trainer* below.
 
 **Two estimator families, one trainer.** The agent's `train_candidate` tool takes a
-`model_kind` plus *that kind's* parameters, validated per kind:
+`model_kind` plus *that kind's* parameters, validated per kind — and a human makes
+the same choice:
 
 | `model_kind` | parameters | why it exists |
 |---|---|---|
@@ -88,9 +99,18 @@ immutable by design, so a retrain is always a new version number.
 Both kinds log under the **same registry name**, with the same `accuracy` / `roc_auc`
 metrics, so promotion, serving, drift and the console need no new concept. Idempotency
 is keyed on the **dataset, the kind and the parameters**, so repeating a training
-reuses the version it already registered instead of adding a second one. The console's
-Train panel is still the gradient-boosting one: its three knobs *are* that kind's
-parameters, mapped in `TrainingWorkflow`.
+reuses the version it already registered instead of adding a second one.
+
+The **kinds have one home** — `packages/ml_platform/model_kinds.py`, copied into both
+the api and the worker image. The api validates a `TrainRequest` against it and serves
+it at `GET /api/models/kinds`; the console's Train panel *generates* its selector and
+its inputs from that response, so a family, a bound or a default cannot drift between
+what the panel shows and what the trainer does. `POST /api/models/train` still takes
+the panel's original three top-level knobs (`n_estimators`, `max_depth`,
+`learning_rate`) and defaults `model_kind` to `gradient_boosting`, so every caller
+written before the family was a choice trains exactly what it always did. The version
+table names the family that produced each row, read back from the training run's own
+parameters.
 
 **Flow to demo:**
 1. Sign in to the console → you'll see the version staged as **Staging**.
@@ -124,6 +144,11 @@ packages/ml_platform/
     orchestrator.py
   context_serving/         # RoutingPolicy: canary weights, blue-green rollback
     routing.py
+  model_kinds.py           # the estimator families the trainer offers, and their
+                           # bounds/defaults: read by the worker (schema, validation,
+                           # build) and by the api (request validation, the console's
+                           # generated Train panel) — one module, both images
+  registry_health.py       # "can this version actually serve?" — the same two readers
 ```
 
 Bounded contexts communicate **only** through domain events — which double as the
@@ -285,6 +310,10 @@ confirmed green:
 | MLflow registry | (Temporal activity) | `v1: stage=Production` ✅ |
 | Serving predict | `POST /v1/predict` (30 features) | routes on `{"1":100}`, real artifact |
 | Retrain from console | `POST /api/models/train` | TrainingWorkflow → new version in Staging |
+| Retrain, either estimator family | `POST /api/models/train` | `gradient_boosting` (as `model_kind` + `params`, **and** as the original three top-level knobs — same version, same numbers) and `logistic_regression` (`C`, `max_iter`) → all `COMPLETED`, all Staging |
+| A bad family or an out-of-range parameter | `POST /api/models/train` | **400** in milliseconds, in the trainer's own words — refused at the boundary, not as a failed workflow |
+| The panel's own vocabulary | `GET /api/models/kinds` | each kind with its parameters, bounds and defaults, generated from the module the trainer validates with |
+| Serving, either family | `POST /v1/predict` | routes to a `Pipeline` (standardized logistic regression) or a `GradientBoostingClassifier` — the real artifact either way |
 | Rollback (blue-green) | `POST /api/models/rollback` | 200 → the prior servable version (`v1` is refused with **409**: its artifact is gone) |
 | Audit trail | `GET /api/models/events` | register/promote/approve/rollback events |
 

@@ -30,6 +30,12 @@ class ModelVersion:
     run_id: str
     artifact_uri: str
     stage: Stage = Stage.NONE
+    # The estimator family that produced this version, as the registry records it
+    # (read back from the training run's params). Not part of the version's identity
+    # — v44 is v44 whatever trained it — which is why it defaults to empty: a version
+    # registered by hand from a run this trainer never made has no family to name,
+    # and "" is more honest than a guess.
+    model_kind: str = ""
 
     @property
     def is_live(self) -> bool:
@@ -55,7 +61,7 @@ class Model:
         self._versions[version_id] = v
         return v
 
-    def sync_from_registry(self, records: list[tuple[str, str, str, Stage]]) -> list[str]:
+    def sync_from_registry(self, records: list[tuple[str, str, str, Stage, str]]) -> list[str]:
         """Adopt versions the read model does not know about yet.
 
         The aggregates here are an in-memory read model, while MLflow is the
@@ -69,13 +75,13 @@ class Model:
         it is the most recent promotion, and it is what an operator expects to
         be serving.
 
-        `records` is `(version_id, run_id, artifact_uri, stage)`, oldest first.
-        Returns the ids that were added.
+        `records` is `(version_id, run_id, artifact_uri, stage, model_kind)`, oldest
+        first. Returns the ids that were added.
         """
         added: list[str] = []
         live: str | None = None
 
-        for version_id, run_id, artifact_uri, stage in records:
+        for version_id, run_id, artifact_uri, stage, model_kind in records:
             if stage is Stage.PRODUCTION:
                 live = version_id
             if version_id in self._versions:
@@ -86,6 +92,7 @@ class Model:
                 run_id=run_id,
                 artifact_uri=artifact_uri,
                 stage=stage,
+                model_kind=model_kind or "",
             )
             added.append(version_id)
 

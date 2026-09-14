@@ -39,7 +39,10 @@ from ml_platform.registry_health import artifact_problem
 # re-stated: comparability of numbers depends on it, and `_data_hash` is what
 # makes a retried training recognisable as the same training.
 from activities import RANDOM_STATE, TEST_SIZE, _data_hash, train_and_register
-import model_kinds
+
+# The trainer's vocabulary, from the shared package the api also reads: the kinds,
+# their bounds and their defaults are one module rather than a copy per service.
+from ml_platform import model_kinds
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 SERVING_URL = os.getenv("SERVING_URL", "http://serving:8001").rstrip("/")

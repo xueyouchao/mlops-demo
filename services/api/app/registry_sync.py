@@ -37,9 +37,8 @@ _STAGE_BY_MLFLOW = {
 }
 
 
-def _records() -> list[tuple[str, str, str, Stage]]:
+def _records(client: MlflowClient) -> list[tuple[str, str, str, Stage]]:
     """Read the model's versions from MLflow, oldest first."""
-    client = MlflowClient(tracking_uri=get_settings().mlflow_tracking_uri)
     versions = client.search_model_versions(f"name='{state.model.name}'")
     records = [
         (
@@ -52,6 +51,31 @@ def _records() -> list[tuple[str, str, str, Stage]]:
     ]
     records.sort(key=lambda r: int(r[0]) if r[0].isdigit() else 0)
     return records
+
+
+def _trained_kind(client: MlflowClient, run_id: str) -> str:
+    """The estimator family that produced a version, or "" when its run does not say.
+
+    MLflow's registry has no column for this, so it is read from the version's
+    *run params*, where the trainer logs it (`train_and_register` logs
+    `model_kind` beside that kind's parameters).
+
+    A version whose run predates the kind being logged reads `""` and the console
+    shows a dash. It is not a claim that the family is unknown: that trainer had
+    only one kind, and the agent's idempotency lookup reads an absent `model_kind`
+    as gradient boosting for exactly that reason. The read model deliberately does
+    not repeat that inference — a version can also be registered by hand from a run
+    that never went through this trainer, and the registry of record is what this
+    function is reporting.
+    """
+    if not run_id:
+        return ""
+    try:
+        return str(client.get_run(run_id).data.params.get("model_kind") or "")
+    except Exception:
+        # A version whose run has gone is still a version; the kind is the only
+        # thing lost, and losing it must not cost the console its version table.
+        return ""
 
 
 def stage_version(version_id: str, stage: str = "Production") -> None:
@@ -85,14 +109,27 @@ def sync_from_registry() -> int:
     trainer run against a live stack shows up without restarting the api.
     """
     try:
-        records = _records()
+        client = MlflowClient(tracking_uri=get_settings().mlflow_tracking_uri)
+        records = _records(client)
     except Exception:
         log.warning("MLflow registry sync failed; serving in-memory state only", exc_info=True)
         return 0
     if not records:
         return 0
 
-    added = state.model.sync_from_registry(records)
+    # The kind is read only for versions the read model does not hold yet, which is
+    # one extra registry read per *training* rather than per version: hydration is
+    # additive, so nothing already known is asked about again. On the first sync
+    # after a restart that is one read per version, once — the price of the version
+    # table saying which family produced each row.
+    known = {v["version_id"] for v in state.versions()}
+    enriched = [
+        (version_id, run_id, artifact_uri, stage,
+         "" if version_id in known else _trained_kind(client, run_id))
+        for version_id, run_id, artifact_uri, stage in records
+    ]
+
+    added = state.model.sync_from_registry(enriched)
     _ensure_routing()
     if added:
         log.info("hydrated %d version(s) from MLflow: %s", len(added), ", ".join(added))

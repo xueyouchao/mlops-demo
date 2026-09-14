@@ -1,21 +1,34 @@
-"""The estimator kinds the trainer offers — the tool's vocabulary, in one place.
+"""The estimator kinds the trainer offers — one vocabulary, in one place.
 
 Why this module exists: `train_candidate` used to *be* one estimator with three
 fixed numbers, and that shape — not the estimator — was what stopped a second
 family being added. The kinds, their parameters, their bounds and their
-construction live here now, so the brain's tool schema, the tool's validation and
-the trainer's build all read one source and cannot drift apart.
+construction live here, so the brain's tool schema, the tool's validation, the
+trainer's build *and* the api's request boundary all read one source and cannot
+drift apart.
 
-**Stdlib only at import time** (scikit-learn is imported inside `build`), because
-`brain.py` imports this to *describe* the kinds to the model and brain.py must
-stay runnable on the host without the worker image — the same reason it carries no
+Why it lives in the shared package rather than in `services/worker/`: choosing a
+family became something a **human** does too, and the console must not be handed a
+second copy of these numbers. A panel that hardcodes three knobs *is* the asymmetry
+this module closes — the agent could pick a family, the operator could not — and a
+panel whose bounds drifted from the trainer's would offer inputs the trainer
+refuses. `services/api/app/routes.py` imports this both to validate a `TrainRequest`
+and to *generate* the panel's inputs, so both images ship it: `packages/ml_platform`
+is already copied into the api, worker and serving images, beside
+`registry_health.py`, the other cross-service module. Nothing here is api-specific
+and nothing here is worker-specific — it is the trainer's vocabulary.
+
+**Stdlib only at import time** (scikit-learn is imported inside `build`), for two
+reasons now: `brain.py` imports this to *describe* the kinds to the model and must
+stay runnable on the host without the worker image, and the api image does not
+install scikit-learn at all. It is the same reason `brain.py` carries no
 third-party imports of its own.
 
 Two kinds, deliberately different inductive bias:
 
   * `gradient_boosting` — the trainer's original estimator: boosted trees, which
     can split and interact features, and whose three numbers are the knobs the
-    console's Train panel has always sent.
+    console's Train panel sent before it could name a family at all.
   * `logistic_regression` — a linear model on **standardized** features. It cannot
     represent a split or an interaction at all, so agreeing with the trees is
     evidence about the data rather than about a re-tuned copy of the same model.
@@ -25,7 +38,8 @@ Two kinds, deliberately different inductive bias:
     ~19 — measured on this dataset, 2026-09-14.
 
 Adding a kind means adding one entry here: the tool schema, the per-kind
-validation and the trainer all follow from it.
+validation, the trainer's build, the api's request validation and the console
+panel's inputs all follow from it.
 """
 from __future__ import annotations
 
@@ -194,6 +208,78 @@ def coerce(kind: str | None, raw) -> tuple[dict | None, str | None]:
             return None, problem
         out[name] = value
     return out, None
+
+
+def resolve_request(kind: str | None, params: dict | None = None,
+                    knobs: dict | None = None) -> tuple[str, dict | None, str | None]:
+    """Resolve a request in either shape — the console's, old or new — into one call.
+
+    Returns `(kind, params, None)`, or `(kind, None, message)` saying why it cannot
+    be trained. This is `coerce` plus the one merge rule that keeps the pre-kind
+    request working, which is why it lives here rather than in the api: the rule is
+    about the trainer's vocabulary — "a knob that was sent is that kind's
+    parameter, and one that was not sent is *absent*, not a value to overwrite
+    with" — and the api, the seed of a future caller, and the tests all read it
+    from one place.
+
+    `knobs` is the trainer's original top-level shape: `n_estimators`, `max_depth`
+    and `learning_rate` sent as three numbers, which is what every caller written
+    before a kind could be chosen still sends. Passing them is not a second code
+    path: they are `gradient_boosting`'s parameters, so they merge into `params`
+    and are validated, defaulted and refused exactly like any other call.
+
+    A `params` that is not an object (a JSON string, say) is handed to `coerce`
+    unchanged, which is what the *agent's* calls rely on; the knobs then do not
+    apply, which cannot happen through the api — its `TrainRequest` types `params`
+    as an object, so the two shapes cannot both arrive malformed.
+    """
+    name = (kind or "").strip() or DEFAULT_KIND
+    merged = params
+    if merged is None or isinstance(merged, dict):
+        merged = dict(merged or {})
+        for knob, value in (knobs or {}).items():
+            if value is not None:  # an omitted knob takes the kind's default, as before
+                merged[knob] = value
+    resolved, problem = coerce(name, merged)
+    return name, resolved, problem
+
+
+def catalog() -> dict:
+    """The kinds as JSON-ready data, for a console that has to show the truth.
+
+    The Train panel is *generated* from this rather than carrying its own copy of
+    the parameters, bounds and defaults: what it shows is then, by construction,
+    what the trainer accepts. That is the whole point of the panel — before this,
+    the three inputs were a hardcoded copy of one kind's knobs, so a human could
+    not even *name* the second family, let alone parameterize it.
+
+    Every key of every parameter spec is represented (`type` excepted: it is the
+    Python-side name of `json_type`, and the console sends JSON), and the test
+    suite checks that — a spec key that stopped being carried here would be a
+    parameter the panel silently stopped offering.
+    """
+    return {
+        "default_kind": DEFAULT_KIND,
+        "kinds": [
+            {
+                "kind": kind,
+                "summary": KINDS[kind]["summary"],
+                "params": [
+                    {
+                        "name": name,
+                        "json_type": pspec["json_type"],
+                        "default": pspec["default"],
+                        "min": pspec.get("min"),
+                        "max": pspec.get("max"),
+                        "exclusive_min": bool(pspec.get("exclusive_min", False)),
+                        "description": pspec["description"],
+                    }
+                    for name, pspec in KINDS[kind]["params"].items()
+                ],
+            }
+            for kind in kind_names()
+        ],
+    }
 
 
 def build(kind: str, params: dict, random_state: int):

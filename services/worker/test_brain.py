@@ -12,6 +12,14 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# `brain.py` reads the trainer's vocabulary from the shared package
+# (`ml_platform/model_kinds.py`), which in the worker image arrives through
+# PYTHONPATH=/workspace. Running on the host has no such path, so put the repo's
+# `packages/` beside `services/worker/` — the same thing `tests/test_domain.py`
+# does, for the same reason.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "packages"
+))
 
 import brain  # noqa: E402
 

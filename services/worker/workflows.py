@@ -140,13 +140,15 @@ class PromotionWorkflow:
 class TrainingWfInput:
     """A training request, in the trainer's general shape.
 
-    `model_kind` + `params` is what the activity takes. The three numeric fields
-    are the *console panel's* knobs — the api's `TrainRequest` still sends exactly
-    those, because the panel the operator has is the gradient-boosting one — and
-    they are mapped onto that kind's parameters in `run`. Defaults, not required
-    fields, so a payload from either side deserialises: the agent does not start
-    this workflow (it calls the activity through its own tool), but a future
-    console panel should not need this file changed to offer a second kind.
+    `model_kind` + `params` is what the activity takes, and it is what the api now
+    sends: the console's Train panel picks an estimator family and posts that
+    kind's parameters, so the operator and the agent name the same thing. The three
+    numeric fields are the panel's *original* knobs — gradient boosting's
+    parameters, sent at the top level before a family could be chosen — and they
+    stay, because a caller written against them must keep working: `run` maps them
+    onto the parameters of the kind the trainer defaults to. Defaults, not required
+    fields, so a payload in either shape deserialises, and the agent does not start
+    this workflow at all (it calls the activity through its own tool).
     """
 
     model_name: str
@@ -154,6 +156,12 @@ class TrainingWfInput:
     max_depth: int = 3
     learning_rate: float = 0.08
     requested_by: str = "system"
+    # Empty means "the trainer's default kind", which the *activity* resolves from
+    # `ml_platform.model_kinds.DEFAULT_KIND`. Deliberately not resolved here: the
+    # name of the default belongs to the one module that owns the kinds, and this
+    # file must stay import-light (see the module docstring — the sandbox forbids
+    # the non-determinism that activities carry, and a second copy of the default
+    # is exactly the drift the shared module exists to prevent).
     model_kind: str = ""
     params: dict | None = None
 
@@ -179,7 +187,7 @@ class TrainingWorkflow:
             "train_and_register",
             {
                 "model_name": inp.model_name,
-                "model_kind": inp.model_kind or "gradient_boosting",
+                "model_kind": inp.model_kind,
                 "params": params,
                 "requested_by": inp.requested_by,
             },

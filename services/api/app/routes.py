@@ -1,9 +1,12 @@
 """API routes — read lifecycle state + trigger the gated actions (promote/rollback)."""
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from ml_platform import model_kinds
 from ml_platform.context_lifecycle import orchestrator as orch
 from ml_platform.registry_health import artifact_problem
 
@@ -17,17 +20,54 @@ from .temporal_port import PromotionAlreadyPending
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
+# The trainer's pre-kind wire shape: gradient boosting's parameters, sent as three
+# top-level numbers. These three names *are* `model_kinds.param_names(DEFAULT_KIND)`
+# — that is why the flat form still means what it meant — and they are spelled out
+# because a pydantic model needs its field names literally. If the shared module
+# ever renamed one, `resolve_request` would hand the spec a name it does not have
+# and `coerce` would refuse the call *by name*, which is the loud version of this
+# drift rather than a silent retrain with a different estimator.
+_LEGACY_KNOBS = ("n_estimators", "max_depth", "learning_rate")
+
 
 class TrainRequest(BaseModel):
-    """Operator-supplied hyperparameters for a retrain.
+    """A retrain request, in either of the trainer's two shapes.
 
-    Bounds are deliberately generous but finite: they keep an accidental
-    n_estimators=10**9 from occupying the worker's activity slot forever.
+    **The shape the console sends now:** `model_kind` plus that kind's `params` —
+    the same shape the agent's `train_candidate` tool and the `train_and_register`
+    activity take. The panel offers the family because a human could not name one
+    before; it is one trainer either way.
+
+    **The shape it used to send, which must keep working:** the three top-level
+    knobs, gradient boosting's parameters. They are kept, typed exactly as
+    before, and they merge into `params` — so a caller that posts
+    `{"n_estimators": 150}` still trains what it always trained. A knob *not* sent
+    is absent rather than a default overwriting anything, which is what makes the
+    two shapes agree: `{"model_kind": "gradient_boosting", "params": {...}}` and
+    the flat three-knob form resolve to the same validated parameters.
+
+    Bounds and defaults are **not** restated here. They live in
+    `ml_platform.model_kinds` — the one module that owns the kinds, which the
+    worker trains and validates with — and `resolved()` enforces them, so an
+    out-of-range knob or an unknown kind is one 4xx written in that module's own
+    words instead of a second, drifting set of rules. (The old
+    `n_estimators=10**9` protection survives unchanged: the bound it hit is the
+    same one, now enforced in the one place that declares it.)
     """
 
-    n_estimators: int = Field(default=120, ge=10, le=1000)
-    max_depth: int = Field(default=3, ge=1, le=10)
-    learning_rate: float = Field(default=0.08, gt=0.0, le=1.0)
+    model_kind: str = Field(default=model_kinds.DEFAULT_KIND)
+    params: dict[str, Any] | None = None
+    n_estimators: int | None = None
+    max_depth: int | None = None
+    learning_rate: float | None = None
+
+    def resolved(self) -> tuple[str, dict | None, str | None]:
+        """The (kind, params) this request means, or why it cannot be trained."""
+        return model_kinds.resolve_request(
+            self.model_kind,
+            self.params,
+            {name: getattr(self, name) for name in _LEGACY_KNOBS},
+        )
 
 
 def _assert_servable(version_id: str) -> None:
@@ -73,6 +113,19 @@ def get_events(user=Depends(security.get_current_user)):
     return {"events": state.events()}
 
 
+@router.get("/kinds")
+def kinds(user=Depends(security.get_current_user)):
+    """The estimator kinds the trainer accepts, with each kind's parameters.
+
+    Read straight out of `ml_platform.model_kinds` — the module the worker builds
+    and validates with and this api refuses a bad `TrainRequest` with — so the
+    console's Train panel can be *generated* from it. That is what keeps the panel
+    honest: it cannot offer a family the trainer does not have, a bound the trainer
+    does not enforce, or a default the trainer would override.
+    """
+    return model_kinds.catalog()
+
+
 @router.post("/train")
 def train(req: TrainRequest, user=Depends(require_role("operator", "admin"))):
     """Retrain from the console: durable TrainingWorkflow -> a new Staging version.
@@ -80,17 +133,29 @@ def train(req: TrainRequest, user=Depends(require_role("operator", "admin"))):
     Declared before the /{version_id}/... routes so the literal path wins. Only
     the pipeline is automated — the new version serves no traffic until a human
     promotes it through the existing approval gate.
+
+    The family is the operator's choice now, and the parameters are that family's.
+    Validation happens *here*, against the trainer's own definitions, because a
+    kind the trainer does not have is a typo the operator can correct on this
+    screen — not a workflow that fails five seconds later with the same sentence
+    buried in an activity error. The activity re-checks regardless: the agent
+    reaches the same trainer without passing through this route.
     """
     if state.port is None:
         raise HTTPException(500, "lifecycle not initialised")
+    kind, params, problem = req.resolved()
+    if problem:
+        raise HTTPException(400, problem)
     wf = state.port.start_training({
         "model_name": state.model.name,
-        "n_estimators": req.n_estimators,
-        "max_depth": req.max_depth,
-        "learning_rate": req.learning_rate,
+        "model_kind": kind,
+        "params": params,
         "requested_by": user["username"],
     })
-    return {"ok": True, "workflow_id": wf, "status": "RUNNING"}
+    # Echo what was actually started: the panel shows it, and a caller that sent
+    # the flat three-knob shape can see the kind and parameters it resolved to.
+    return {"ok": True, "workflow_id": wf, "status": "RUNNING",
+            "model_kind": kind, "params": params}
 
 
 @router.get("/train/{workflow_id}")

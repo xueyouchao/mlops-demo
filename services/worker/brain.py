@@ -48,9 +48,11 @@ except Exception:
     sentry_sdk = None
 
 # The estimator kinds the trainer offers, imported from the one module that owns
-# them so the tool schema below *is* the trainer's vocabulary rather than a copy
-# of it. Stdlib-only at import time, like this module — see model_kinds.py.
-import model_kinds
+# them so the tool schema below *is* the trainer's vocabulary rather than a copy of
+# it — the api validates its own training requests against the same module. That
+# module now lives in the shared package (`ml_platform/model_kinds.py`) precisely
+# because two services read it; it is stdlib-only at import time, like this one.
+from ml_platform import model_kinds
 
 try:  # sentry-sdk >= 2.64: `set_conversation_id` / `set_data_normalized`
     import sentry_sdk.ai as sdk_ai

@@ -110,21 +110,53 @@ function Login() {
 }
 
 function TrainPanel({ refresh }) {
-  const [params, setParams] = useState({ n_estimators: 120, max_depth: 3, learning_rate: 0.08 });
+  // The panel is *generated* from the trainer's own definitions, which the api
+  // serves at /api/models/kinds out of the same module the worker trains with.
+  // There is no second copy of the parameters here on purpose: three hardcoded
+  // inputs were the asymmetry this closes (the agent could pick an estimator
+  // family, a human could not), and hardcoded bounds would let the panel offer
+  // inputs the trainer refuses.
+  const [catalog, setCatalog] = useState(null); // { default_kind, kinds: [...] }
+  const [kind, setKind] = useState("");
+  // Per kind, so switching back and forth does not throw away what was typed —
+  // and so a switch can never leave another family's parameter in the payload.
+  const [values, setValues] = useState({}); // { kind: { param: text } }
   const [job, setJob] = useState(null); // { workflow_id, status, result, error }
   const jobId = job?.workflow_id;
   const jobStatus = job?.status;
 
+  useEffect(() => {
+    api("/api/models/kinds")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c) => {
+        if (!c) return;
+        setCatalog(c);
+        setKind(c.default_kind);
+        // Every input starts at the default the *trainer* declares, so an
+        // untouched panel means exactly what an omitted parameter means.
+        setValues(Object.fromEntries(c.kinds.map((k) => [
+          k.kind,
+          Object.fromEntries(k.params.map((p) => [p.name, String(p.default)])),
+        ])));
+      })
+      .catch(() => setCatalog(null));
+  }, []);
+
+  const spec = catalog?.kinds.find((k) => k.kind === kind);
+
   const start = async () => {
+    if (!spec) return;
+    // Exactly the parameters the panel is showing, for the kind it is showing.
+    // An emptied box becomes `Number("")` — 0 — which the trainer's own bound
+    // refuses, rather than being silently trained at its default.
+    const params = Object.fromEntries(
+      spec.params.map((p) => [p.name, Number(values[kind]?.[p.name])])
+    );
     setJob({ status: "STARTING" });
     const r = await api("/api/models/train", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        n_estimators: Number(params.n_estimators),
-        max_depth: Number(params.max_depth),
-        learning_rate: Number(params.learning_rate),
-      }),
+      body: JSON.stringify({ model_kind: kind, params }),
     });
     const body = await r.json().catch(() => null);
     if (!r.ok) {
@@ -152,7 +184,8 @@ function TrainPanel({ refresh }) {
     return () => clearInterval(timer);
   }, [jobId, jobStatus]);
 
-  const set = (k) => (e) => setParams({ ...params, [k]: e.target.value });
+  const set = (name) => (e) =>
+    setValues({ ...values, [kind]: { ...values[kind], [name]: e.target.value } });
   const busy = jobStatus === "RUNNING" || jobStatus === "STARTING";
 
   return (
@@ -165,21 +198,44 @@ function TrainPanel({ refresh }) {
       </p>
       <div className="row">
         <label>
-          n_estimators
-          <input value={params.n_estimators} onChange={set("n_estimators")} />
+          model_kind
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value)}
+            disabled={busy || !catalog}
+          >
+            {(catalog?.kinds || []).map((k) => (
+              <option key={k.kind} value={k.kind}>{k.kind}</option>
+            ))}
+          </select>
         </label>
-        <label>
-          max_depth
-          <input value={params.max_depth} onChange={set("max_depth")} />
-        </label>
-        <label>
-          learning_rate
-          <input value={params.learning_rate} onChange={set("learning_rate")} />
-        </label>
-        <button onClick={start} disabled={busy}>
+        {(spec?.params || []).map((p) => (
+          <label key={p.name} title={p.description}>
+            {p.name}
+            <input
+              type="number"
+              value={values[kind]?.[p.name] ?? ""}
+              onChange={set(p.name)}
+              // The trainer's own bound, as browser guidance — advisory; the
+              // trainer is what actually refuses. An exclusive bound is left off
+              // so the browser never suggests the excluded value is allowed.
+              min={p.exclusive_min ? undefined : p.min ?? undefined}
+              max={p.max ?? undefined}
+              step={p.json_type === "integer" ? 1 : "any"}
+            />
+          </label>
+        ))}
+        <button onClick={start} disabled={busy || !spec}>
           {busy ? "Training…" : "Train & register"}
         </button>
       </div>
+      {spec && <p className="hint">{spec.summary}</p>}
+      {!catalog && (
+        <div className="err">
+          the trainer&apos;s estimator families could not be read from the api, so this
+          panel will not offer parameters it cannot vouch for — reload once the api is up.
+        </div>
+      )}
       {jobId && (
         <p className="status">
           workflow <b>{jobId}</b> — {job?.status}
@@ -276,7 +332,7 @@ function InlineConsole({ data, error, call, refresh }) {
         <h2>Versions &amp; Stages</h2>
         <table>
           <thead>
-            <tr><th>id</th><th>stage</th><th>run</th><th>traffic %</th></tr>
+            <tr><th>id</th><th>stage</th><th>kind</th><th>run</th><th>traffic %</th></tr>
           </thead>
           <tbody>
             {(data?.models?.versions || []).map((v) => {
@@ -293,6 +349,15 @@ function InlineConsole({ data, error, call, refresh }) {
                   <td>{v.version_id}</td>
                   <td className={`stage-${serving ? "serving" : String(v.stage).toLowerCase()}`}>
                     {label}
+                  </td>
+                  {/* The family that produced this version, read back from the
+                      registry. A dash is a version whose run does not record one —
+                      it predates the kind being logged, or it was registered by
+                      hand from a run this trainer never made — and the title says
+                      which, rather than the table guessing a family for it. */}
+                  <td title={v.model_kind ? undefined
+                        : "this version's training run does not record a model_kind"}>
+                    {v.model_kind || "—"}
                   </td>
                   <td>{v.run_id}</td>
                   <td>{weights[v.version_id] ?? 0}</td>

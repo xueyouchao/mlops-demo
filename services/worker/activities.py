@@ -22,9 +22,11 @@ from temporalio.exceptions import ApplicationError
 from mlflow.tracking import MlflowClient
 
 from ml_platform.registry_health import artifact_problem
+# The kinds live in the shared package because the api reads them too — it
+# validates a `TrainRequest` against exactly these definitions.
+from ml_platform import model_kinds
 
 import brain
-import model_kinds
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 

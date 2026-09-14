@@ -89,6 +89,9 @@ button { font: inherit; }
 .stage-serving { color: #0a7; font-weight: 700; letter-spacing: 0.02em; }
 .stage-retired, .stage-none, .stage-archived { color: #8a8f98; }
 .ops input { padding: 5px; border: 1px solid #999; border-radius: 4px; }
+/* The estimator-family selector sits in the same row as the parameter inputs,
+   so it is styled like them and sized to the longest kind name it can show. */
+.ops select { padding: 5px; border: 1px solid #999; border-radius: 4px; background: #fff; }
 .ops pre { background: #0e1116; color: #d3e0f0; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 260px; }
 .err { background: #fdd; border: 1px solid #c66; color: #800; padding: 8px 12px; border-radius: 6px; margin: 10px 0; }
 
@@ -96,6 +99,7 @@ button { font: inherit; }
 .ops .row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 12px 0 4px; }
 .ops .row label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: #444; }
 .ops .row input { width: 92px; }
+.ops .row select { width: 172px; }
 .ops textarea {
   width: 100%; padding: 8px; border: 1px solid #999; border-radius: 6px; resize: vertical;
   font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;

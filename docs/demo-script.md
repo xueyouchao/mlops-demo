@@ -64,6 +64,17 @@ earlier run left a promotion parked at the gate.
 
 Then open the console, sign in as `operator` / `operator-pass`, and click **Agent**.
 
+**One optional detour worth 30 seconds, if the room asks who trains here.** The console's
+*Train a candidate* panel takes the same family choice the agent's `train_candidate` tool
+does: pick `logistic_regression` and its inputs become `C` / `max_iter`, pick
+`gradient_boosting` and they become the three knobs they have always been — the panel is
+generated from the trainer's own definitions (`GET /api/models/kinds`), so it offers
+exactly what the trainer accepts and a bad family or a bound comes back as a 400 on the
+spot. The version table then names the family that produced each row. The agent and the
+human are two doors into one trainer: same registry name, same split, same two metrics,
+same idempotency key. What differs is only who decides — and the seed trainer
+(`--profile tools`) is the one entry point that stays gradient-boosting only.
+
 ---
 
 ## Act 1 — An investigation, and a decision you make
