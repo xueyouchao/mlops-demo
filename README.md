@@ -66,9 +66,9 @@ Then:
 ```bash
 docker compose --profile tools run --rm trainer
 ```
-This trains a GradientBoosting classifier on Breast Cancer Wisconsin, logs the
-run + lineage (data hash, dataset, params) to MLflow, registers a version, and
-auto-stages it (awaiting the human production gate).
+This seed trainer trains a **GradientBoosting** classifier on Breast Cancer
+Wisconsin, logs the run + lineage (data hash, dataset, params) to MLflow,
+registers a version, and auto-stages it (awaiting the human production gate).
 
 **Or retrain from the console:** the **Ops Console** has a *Train a candidate*
 panel — set `n_estimators` / `max_depth` / `learning_rate` and click
@@ -76,6 +76,11 @@ panel — set `n_estimators` / `max_depth` / `learning_rate` and click
 the worker (no `tools` profile, no shell), and the new version lands in
 **Staging**. Training never edits an existing version — `ModelVersion` is
 immutable by design, so a retrain is always a new version number.
+
+Both human entry points — this seed script and the console panel — train the
+**gradient-boosting** family, because their knobs *are* that kind's parameters.
+Choosing *between* estimator families is the agent's `train_candidate` tool; see
+*Two estimator families, one trainer* below.
 
 **Two estimator families, one trainer.** The agent's `train_candidate` tool takes a
 `model_kind` plus *that kind's* parameters, validated per kind:
