@@ -79,6 +79,15 @@ button { font: inherit; }
 .ops td, .ops th { border: 1px solid #eef0f4; padding: 6px 8px; text-align: left; }
 .stage-production { color: #0a7; font-weight: 600; }
 .stage-staging { color: #a70; }
+
+/* What is live should be findable at a glance: this table exists to answer "what is
+   serving". The row carrying traffic gets the accent; the version MLflow still calls
+   Production while nothing routes to it goes quiet. The two used to look identical,
+   which is how a retired version read as a second production. */
+.row-serving td { background: rgba(0, 170, 119, 0.1); }
+.row-serving td:first-child { box-shadow: inset 3px 0 0 #0a7; }
+.stage-serving { color: #0a7; font-weight: 700; letter-spacing: 0.02em; }
+.stage-retired, .stage-none, .stage-archived { color: #8a8f98; }
 .ops input { padding: 5px; border: 1px solid #999; border-radius: 4px; }
 .ops pre { background: #0e1116; color: #d3e0f0; padding: 12px; border-radius: 6px; font-size: 12px; overflow: auto; max-height: 260px; }
 .err { background: #fdd; border: 1px solid #c66; color: #800; padding: 8px 12px; border-radius: 6px; margin: 10px 0; }

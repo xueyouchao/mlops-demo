@@ -276,9 +276,11 @@ function InlineConsole({ data, error, call, refresh }) {
               const serving = (weights[v.version_id] ?? 0) > 0;
               const label = serving ? "serving" : v.stage === "Production" ? "retired" : v.stage;
               return (
-                <tr key={v.version_id}>
+                <tr key={v.version_id} className={serving ? "row-serving" : undefined}>
                   <td>{v.version_id}</td>
-                  <td className={`stage-${serving ? "Production" : v.stage}`}>{label}</td>
+                  <td className={`stage-${serving ? "serving" : String(v.stage).toLowerCase()}`}>
+                    {label}
+                  </td>
                   <td>{v.run_id}</td>
                   <td>{weights[v.version_id] ?? 0}</td>
                 </tr>
