@@ -244,16 +244,28 @@ function PredictPanel() {
 }
 
 function InlineConsole({ data, error, call, refresh }) {
-  const [version, setVersion] = useState("1");
+  const [version, setVersion] = useState(""); // empty, deliberately: the box used to
+  // default to "1", and one unconsidered click of Rollback sent production there.
   // The human-approval gate is keyed by the workflow id that promote returns:
   // the approve signal has to go to *that* workflow, not a placeholder.
   const [pending, setPending] = useState(null); // { version, workflow_id }
+  const [note, setNote] = useState(null);
   const weights = data?.routing?.weights || {};
 
   const startPromotion = async () => {
-    if (!version) return;
+    if (!version.trim()) return;
     const res = await call(`/api/models/${version}/promote`);
-    if (res?.workflow_id) setPending({ version, workflow_id: res.workflow_id });
+    if (res?.workflow_id) {
+      setPending({ version, workflow_id: res.workflow_id });
+      setNote(null);
+    } else {
+      // A 409 here used to look like a dead button: `call` resolved with a body
+      // that has no workflow_id, nothing was set, and the promotion that was
+      // already waiting at the gate stayed invisible.
+      setNote(res?.detail
+        ? `promote refused: ${res.detail}`
+        : `no promotion started for v${version} — check the error above`);
+    }
   };
 
   return (
@@ -298,13 +310,24 @@ function InlineConsole({ data, error, call, refresh }) {
           ))}
         </ul>
         <label>
-          canary % for version&nbsp;
-          <input value={version} onChange={(e) => setVersion(e.target.value)} style={{ width: 40 }} />
+          version id for&nbsp;
+          <input
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            placeholder="e.g. 25"
+            style={{ width: 56 }}
+          />
         </label>
-        <button onClick={startPromotion}>Promote (gate)</button>
+        <button
+          disabled={!version.trim()}
+          title="files a promotion and waits at the human gate — traffic does not move yet"
+          onClick={startPromotion}
+        >
+          Start a promotion (goes to the gate)
+        </button>
         <button
           disabled={!pending}
-          title={pending ? `signal ${pending.workflow_id}` : "run Promote first"}
+          title={pending ? `signal ${pending.workflow_id}` : "start a promotion first"}
           onClick={() =>
             pending &&
             call(`/api/models/${pending.version}/approve?workflow_id=${encodeURIComponent(pending.workflow_id)}`)
@@ -312,7 +335,23 @@ function InlineConsole({ data, error, call, refresh }) {
         >
           Approve
         </button>
-        <button onClick={() => call(`/api/models/rollback?to_version_id=${version}`)}>Rollback</button>
+        <button
+          disabled={!version.trim()}
+          title="moves live traffic to this version right now, bypassing the gate"
+          onClick={() => {
+            // The three buttons are an ask, an answer and an override; the override
+            // is the one that moves production with no workflow behind it, so it is
+            // the one that asks first. A default of "1" in this box once sent
+            // production to a version whose artifact was gone.
+            if (!version.trim()) return;
+            if (window.confirm(`Send 100% of traffic to v${version} now? This bypasses the approval gate and is not recorded as a promotion.`)) {
+              call(`/api/models/rollback?to_version_id=${version}`);
+            }
+          }}
+        >
+          Send traffic now (override)
+        </button>
+        {note && <div className="err">{note}</div>}
       </section>
 
       <TrainPanel refresh={refresh} />
