@@ -7,6 +7,7 @@ last check talks to the host's real ollama and is skipped if it is not there.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 
@@ -161,16 +162,23 @@ d = brain.decide("goal", [])
 check("off refuses to fall back", d["ok"] is False and d["kind"] == "unreachable", str(d))
 
 # --------------------------------------------------------------------------
-print("\nthe model call's Sentry span")
+print("\nthe Sentry shape of one step")
 # Sentry is stood in for here: what matters is what brain.py *asks* it for, and
 # that is checkable without a DSN, a network, or the real SDK's version quirks.
 # The reply is a real ollama-shaped response, so the token counts are the ones
 # the model would actually report.
+#
+# The fake mirrors the two SDK behaviours the shape depends on: `new_scope()`
+# forks a scope and `ai.set_conversation_id` writes onto the current (forked)
+# one; and `ai.set_data_normalized` unpacks a one-element list, which is how
+# `["stop"]` becomes the string the real SDK sends.
 
 
 class FakeSpan:
     def __init__(self, op=None, name=None):
-        self.op, self.name = op, name
+        self.op = op
+        self.description = name
+        self.name = name
         self.data, self.children = {}, []
         self.finished = False
 
@@ -186,14 +194,69 @@ class FakeSpan:
         return child
 
 
+class FakeScope:
+    def __init__(self, sentry):
+        self.sentry = sentry
+        self.conversation_id = None
+        self.exited = False
+
+    def __enter__(self):
+        self.sentry.scopes.append(self)
+        return self
+
+    def __exit__(self, *exc):
+        self.exited = True
+        self.sentry.scopes.pop()
+        return None
+
+
+class FakeAi:
+    def __init__(self, sentry):
+        self.sentry = sentry
+
+    def set_conversation_id(self, conversation_id):
+        if not self.sentry.scopes:
+            raise RuntimeError("set_conversation_id outside a scope")
+        self.sentry.scopes[-1].conversation_id = conversation_id
+
+    def set_data_normalized(self, span, key, value, unpack=True):
+        # `unpack` is the SDK's own argument, mirrored: True collapses a
+        # one-element list (right for finish_reasons), False keeps it a list
+        # (required for the message arrays).
+        span.set_data(key, value[0] if unpack and isinstance(value, list) and len(value) == 1
+                      else json.dumps(value))
+
+
+class FakeClient:
+    """Just the one option brain.py asks the client about."""
+
+    def __init__(self, pii):
+        self._pii = pii
+
+    def should_send_default_pii(self):
+        return self._pii
+
+
 class FakeSentry:
-    def __init__(self):
+    def __init__(self, pii=False):
         self.transactions = []
+        self.scopes = []          # the open scope stack
+        self.scopes_created = []  # every fork, kept so it can be inspected after exit
+        self.ai = FakeAi(self)
+        self.client = FakeClient(pii)
+
+    def get_client(self):
+        return self.client
 
     def start_transaction(self, op=None, name=None):
         t = FakeSpan(op, name)
         self.transactions.append(t)
         return t
+
+    def new_scope(self):
+        scope = FakeScope(self)
+        self.scopes_created.append(scope)
+        return scope
 
 
 class RudeSpan:
@@ -213,66 +276,266 @@ class RudeSentry:
     def start_transaction(self, **kwargs):
         raise RuntimeError("telemetry is broken")
 
+    def new_scope(self, **kwargs):
+        raise RuntimeError("telemetry is broken")
+
 
 class RudeChildSentry:
     def start_transaction(self, **kwargs):
         return RudeSpan()
 
+    def new_scope(self, **kwargs):
+        return FakeScope(FakeSentry())
+
 
 OLLAMA_REPLY = {
-    "model": "deepseek-v4.1-flash:cloud", "done_reason": "stop",
+    "model": "deepseek-v4.1-flash", "done_reason": "stop",
     "prompt_eval_count": 812, "eval_count": 64,
     "message": {"tool_calls": [
         {"function": {"name": "read_registry", "arguments": {"why": "start from the registry"}}}]},
 }
 DECIDE_CONFIG = {"model": "deepseek-v4.1-flash:cloud", "base_url": "http://ollama",
                  "num_predict": 4096, "fallback": "auto", "timeout_s": 60}
+RUN_ID = "agent-1f4c9a2b"
 
 real_post_json = brain._post_json
 real_sentry = brain.sentry_sdk
+real_sdk_ai = brain.sdk_ai
 brain._post_json = lambda url, payload, timeout_s, attempts=2: OLLAMA_REPLY
 brain.reset_model_breaker()   # the unreachable checks above tripped it
 
+check("a workflow id is already a safe conversation id",
+      brain.conversation_id_for(RUN_ID) == RUN_ID, brain.conversation_id_for(RUN_ID))
+check("one that is not is made safe (Sentry uses it as a URL path segment)",
+      "/" not in brain.conversation_id_for("agent/../x y")
+      and brain.conversation_id_for("agent/../x y").strip("-") != "",
+      brain.conversation_id_for("agent/../x y"))
+check("no run id means no conversation id, rather than a made-up one",
+      brain.conversation_id_for(None) == "" and brain.conversation_id_for("") == "")
+
 fake = FakeSentry()
 brain.sentry_sdk = fake
-d = brain.decide("goal", [], DECIDE_CONFIG)
-spans = [s for t in fake.transactions for s in t.children]
+brain.sdk_ai = fake.ai
+d = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
+txns = fake.transactions
+agent_spans = [c for t in txns for c in t.children]
+model_spans = [c for a in agent_spans for c in a.children]
 
-check("a model call opens exactly one gen_ai span", len(spans) == 1 and spans[0].op == "gen_ai.chat",
-      str([(t.op, [s.op for s in t.children]) for t in fake.transactions]))
-check("the span is named for the operation and the model",
-      spans and spans[0].name == f"chat {DECIDE_CONFIG['model']}", str(spans and spans[0].name))
-check("it names the operation, the provider and the requested model",
-      spans and (spans[0].data.get("gen_ai.operation.name"),
-                 spans[0].data.get("gen_ai.provider.name"),
-                 spans[0].data.get("gen_ai.request.model")) == ("chat", "ollama", DECIDE_CONFIG["model"]),
-      str(spans and spans[0].data))
-check("token usage is recorded when the response reports it",
-      spans and (spans[0].data.get("gen_ai.usage.input_tokens"),
-                 spans[0].data.get("gen_ai.usage.output_tokens")) == (812, 64),
-      str(spans and spans[0].data))
-check("the container span claims no gen_ai operation of its own",
-      all(t.op == "function" for t in fake.transactions), str([t.op for t in fake.transactions]))
-check("both spans are finished (an unfinished span is dropped)",
-      spans and spans[0].finished and all(t.finished for t in fake.transactions))
+check("one step opens one container span, and it claims no gen_ai operation",
+      len(txns) == 1 and txns[0].op == "function"
+      and not any(k.startswith("gen_ai.") for k in txns[0].data),
+      str([(t.op, sorted(t.data)) for t in txns]))
+check("the agent span is an invoke_agent span, one per step",
+      len(agent_spans) == 1 and agent_spans[0].op == "gen_ai.invoke_agent",
+      str([(a.op, a.description) for a in agent_spans]))
+check("named for the operation and the agent, so a run reads as an agent invocation",
+      agent_spans and agent_spans[0].description == f"invoke_agent {brain.AGENT_NAME}",
+      str(agent_spans and agent_spans[0].description))
+check("it names the operation and the agent",
+      agent_spans and (agent_spans[0].data.get("gen_ai.operation.name"),
+                       agent_spans[0].data.get("gen_ai.agent.name"))
+      == ("invoke_agent", brain.AGENT_NAME),
+      str(agent_spans and agent_spans[0].data))
+check("and carries the run's conversation id",
+      agent_spans and agent_spans[0].data.get("gen_ai.conversation.id") == RUN_ID,
+      str(agent_spans and agent_spans[0].data))
+check("a model call is one gen_ai.chat span, beneath the agent span",
+      len(model_spans) == 1 and model_spans[0].op == "gen_ai.chat",
+      str([(m.op, m.description) for m in model_spans]))
+check("named for the operation and the model",
+      model_spans and model_spans[0].description == f"chat {DECIDE_CONFIG['model']}",
+      str(model_spans and model_spans[0].description))
+check("it names the provider, the requested model and the served one",
+      model_spans and (model_spans[0].data.get("gen_ai.provider.name"),
+                       model_spans[0].data.get("gen_ai.request.model"),
+                       model_spans[0].data.get("gen_ai.response.model"))
+      == ("ollama", DECIDE_CONFIG["model"], "deepseek-v4.1-flash"),
+      str(model_spans and model_spans[0].data))
+check("it records the finish reason the way the SDK's own integrations do",
+      model_spans and model_spans[0].data.get("gen_ai.response.finish_reasons") == "stop",
+      str(model_spans and model_spans[0].data))
+check("token usage is recorded when the response reports it, the total included",
+      model_spans and (model_spans[0].data.get("gen_ai.usage.input_tokens"),
+                       model_spans[0].data.get("gen_ai.usage.output_tokens"),
+                       model_spans[0].data.get("gen_ai.usage.total_tokens")) == (812, 64, 876),
+      str(model_spans and model_spans[0].data))
+check("the model span is in the same conversation as its agent span",
+      model_spans and model_spans[0].data.get("gen_ai.conversation.id") == RUN_ID,
+      str(model_spans and model_spans[0].data))
+check("every span is finished (an unfinished span is dropped)",
+      all(t.finished for t in txns) and all(a.finished for a in agent_spans)
+      and all(m.finished for m in model_spans))
+check("the decision still carries the model's answer, unchanged",
+      d.get("ok") and d.get("tool") == "read_registry" and d.get("producer") == "model", str(d))
+
+# The scope fork is what stops a run's conversation id leaking onto the next run
+# that lands on this thread: activities share a long-lived thread pool.
+leak = FakeSentry()
+brain.sentry_sdk = leak
+brain.sdk_ai = leak.ai
+brain.decide("goal", [], DECIDE_CONFIG, run_id="agent-first")
+brain.decide("goal", [], DECIDE_CONFIG, run_id="agent-second")
+check("the conversation id is set through the SDK's own API, on a forked scope",
+      [s.conversation_id for s in leak.scopes_created] == ["agent-first", "agent-second"],
+      str([s.conversation_id for s in leak.scopes_created]))
+check("and every fork is closed again, so nothing is left on the thread's scope",
+      not leak.scopes and all(s.exited for s in leak.scopes_created),
+      f"open scopes: {leak.scopes}")
+check("and a second run does not inherit the first one's conversation id",
+      [t.children[0].data.get("gen_ai.conversation.id") for t in leak.transactions]
+      == ["agent-first", "agent-second"],
+      str([t.children[0].data.get("gen_ai.conversation.id") for t in leak.transactions]))
+
+# Prompt and output capture is off unless the operator turned it on: the code
+# default must capture nothing, and the switch is the SDK's own.
+check("with content capture off, no prompt or answer is recorded at all",
+      not any(k in model_spans[0].data for k in ("gen_ai.input.messages",
+                                                 "gen_ai.output.messages",
+                                                 "gen_ai.system_instructions")),
+      str(sorted(model_spans[0].data)))
+
+pii = FakeSentry(pii=True)
+brain.sentry_sdk = pii
+brain.sdk_ai = pii.ai
+d_pii = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
+pii_model = [c for t in pii.transactions for a in t.children for c in a.children]
+pii_agent = [c for t in pii.transactions for c in t.children]
+carried = pii_model[0].data if pii_model else {}
+
+# Every content attribute is a *stringified array*, which is what the views
+# parse, so the checks parse it back rather than trusting the string.
+def _parsed(key):
+    try:
+        return json.loads(carried.get(key) or "null")
+    except Exception:
+        return None
+
+
+check("with content capture on, the system prompt goes in system_instructions",
+      _parsed("gen_ai.system_instructions") == [{"type": "text", "text": brain.SYSTEM_PROMPT}],
+      str(carried.get("gen_ai.system_instructions"))[:120])
+check("the operator's goal and the transcript are the input message",
+      (lambda m: bool(m) and m[0]["role"] == "user"
+       and m[0]["parts"][0]["type"] == "text"
+       and "Operator goal: goal" in m[0]["parts"][0]["content"]
+       and "Choose the next step." in m[0]["parts"][0]["content"])(
+          _parsed("gen_ai.input.messages")),
+      str(carried.get("gen_ai.input.messages"))[:120])
+check("the model's answer is the output message, tool call and finish reason included",
+      _parsed("gen_ai.output.messages") == [{
+          "role": "assistant",
+          "parts": [{"type": "tool_call", "name": "read_registry",
+                     "arguments": {"why": "start from the registry"}}],
+          "finish_reason": "stop",
+      }],
+      str(carried.get("gen_ai.output.messages"))[:160])
+check("and the conversation id is still there beside the content",
+      carried.get("gen_ai.conversation.id") == RUN_ID
+      and pii_agent and pii_agent[0].data.get("gen_ai.conversation.id") == RUN_ID,
+      str((carried.get("gen_ai.conversation.id"),
+           pii_agent and pii_agent[0].data.get("gen_ai.conversation.id"))))
+check("the decision is unchanged by capturing it",
+      d_pii.get("ok") and d_pii.get("tool") == "read_registry", str(d_pii))
+
+# A client that cannot even be asked must read as "off", never as a crash.
+class MuteClient:
+    def get_client(self):
+        raise RuntimeError("telemetry is broken")
+
+
+mute = FakeSentry(pii=True)
+mute.get_client = MuteClient().get_client
+brain.sentry_sdk = mute
+brain.sdk_ai = mute.ai
+d_mute = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
+mute_model = [c for t in mute.transactions for a in t.children for c in a.children]
+check("a client that refuses to be asked captures nothing and breaks nothing",
+      d_mute.get("ok") and mute_model
+      and "gen_ai.input.messages" not in mute_model[0].data,
+      str((d_mute.get("tool"), sorted(mute_model[0].data) if mute_model else None)))
+
+brain.sentry_sdk = fake
+brain.sdk_ai = fake.ai
 
 fakeless = FakeSentry()
 brain.sentry_sdk = fakeless
-brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="on"))
-check("the scripted fallback emits no LLM span at all (it is not a model call)",
-      fakeless.transactions == [], str([t.op for t in fakeless.transactions]))
+brain.sdk_ai = fakeless.ai
+brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="on"), run_id=RUN_ID)
+labelled = [c for t in fakeless.transactions for c in t.children]
+check("the scripted fallback emits no model span at all (it is not a model call)",
+      labelled and not any(m.op == "gen_ai.chat" for a in labelled for m in a.children),
+      str([(a.op, [m.op for m in a.children]) for a in labelled]))
+check("and its agent span says, in its name, that a policy decided",
+      labelled and labelled[0].description ==
+      f"invoke_agent {brain.AGENT_NAME} [scripted policy, no model call]",
+      str(labelled and labelled[0].description))
+check("with the producer and the reason as attributes to filter on",
+      labelled and (labelled[0].data.get("agent.producer"),
+                    labelled[0].data.get("agent.fallback_reason"))
+      == ("scripted-policy", "AGENT_FALLBACK=on"),
+      str(labelled and labelled[0].data))
+pii_scripted = FakeSentry(pii=True)
+brain.sentry_sdk = pii_scripted
+brain.sdk_ai = pii_scripted.ai
+brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="on"), run_id=RUN_ID)
+scripted_spans = [c for t in pii_scripted.transactions for c in t.children]
+check("even with content capture on, the scripted policy records no prompt or answer",
+      scripted_spans and not any(
+          k in ("gen_ai.input.messages", "gen_ai.output.messages",
+                "gen_ai.system_instructions")
+          for s_ in scripted_spans for k in s_.data)
+      and not any(c.children for c in scripted_spans),
+      str([sorted(s_.data) for s_ in scripted_spans]))
+brain.sentry_sdk = fake
+brain.sdk_ai = fake.ai
+
+check("and it never claims a model was asked anything",
+      labelled and not any(k.startswith("gen_ai.request.") or k == "gen_ai.provider.name"
+                           for k in labelled[0].data),
+      str(labelled and labelled[0].data))
+
+# `off` fails rather than falling back, so its agent span must not claim a policy
+# decided — the label is what an operator filters on.
+off_case = FakeSentry()
+brain.sentry_sdk = off_case
+brain.sdk_ai = off_case.ai
+real_post = brain._post_json
+def _unreachable(*a, **kw):
+    raise brain.BrainError("unreachable", "connection refused")
+brain._post_json = _unreachable
+brain.reset_model_breaker()
+d_off = brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="off", base_url="http://127.0.0.1:1"), run_id=RUN_ID)
+brain._post_json = real_post
+brain.reset_model_breaker()
+check("a failed run with fallback=off is not labelled as the policy",
+      d_off.get("ok") is False and off_case.transactions
+      and "[scripted policy" not in (off_case.transactions[0].children[0].description or ""),
+      str((d_off, off_case.transactions and off_case.transactions[0].children[0].description)))
+
+ungrouped = FakeSentry()
+brain.sentry_sdk = ungrouped
+brain.sdk_ai = ungrouped.ai
+d = brain.decide("goal", [], DECIDE_CONFIG)   # no run id: an ungrouped step
+check("without a run id the spans are still emitted, just ungrouped",
+      ungrouped.transactions and ungrouped.transactions[0].children
+      and "gen_ai.conversation.id" not in ungrouped.transactions[0].children[0].data, str(d))
 
 brain.sentry_sdk = RudeSentry()
-d2 = brain.decide("goal", [], DECIDE_CONFIG)
+brain.sdk_ai = None
+d2 = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
 check("a Sentry that raises cannot fail the run", d2.get("ok") and d2.get("producer") == "model", str(d2))
 
 brain.sentry_sdk = RudeChildSentry()
-d3 = brain.decide("goal", [], DECIDE_CONFIG)
+d3 = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
 check("nor can a span that refuses every attribute",
       d3.get("ok") and d3.get("producer") == "model", str(d3))
 
+check("and the conversation API being absent still leaves a usable run",
+      brain.sdk_ai is None and d3.get("ok"), str(d3))
+
 brain._post_json = real_post_json
 brain.sentry_sdk = real_sentry
+brain.sdk_ai = real_sdk_ai
 
 # --------------------------------------------------------------------------
 print("\nthe real model (host ollama)")

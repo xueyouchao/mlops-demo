@@ -125,7 +125,8 @@ Bounded contexts communicate **only** through domain events — which double as 
   **Temporal** workflow that waits on the approve signal; pipeline steps are auto.
 - **Serving:** weight-based **canary + blue-green** router (A/B measurement is out of scope).
 - **Sentry:** `sentry-sdk` wired across services, driven by `SENTRY_DSN` env
-  (no-ops when empty; no self-hosted Sentry).
+  (no-ops when empty; no self-hosted Sentry). The worker's agent loop also emits
+  **agent traces**: see [What an investigation looks like in Sentry](#what-an-investigation-looks-like-in-sentry).
 - **Investigation agent:** a durable ReAct loop on Temporal (8 steps, one tool call
   each, brain as an activity) that can investigate the registry, train a candidate and
   propose a promotion — then waits at the same human gate. Its transcript is its own
@@ -156,12 +157,71 @@ python3 services/worker/test_brain.py        # the agent's brain; the last group
                                              # real model, so it needs ollama on the host
 ```
 
+## What an investigation looks like in Sentry
+
+One **investigation is one conversation**, and each of its steps is one agent
+invocation with the model call beneath it:
+
+```
+transaction  op=function, "agent step agent-1f4c9a2b"   ← container; a Temporal worker
+└── gen_ai.invoke_agent  "invoke_agent ml-lifecycle-investigator"   has no request to
+    └── gen_ai.chat      "chat deepseek-v4.1-flash:cloud"           have started one
+```
+
+* The **conversation id is the Temporal workflow id** (`agent-<hex>`), so a run that
+  is killed and resumed keeps writing into the same conversation — the run's own
+  durable identity is what groups it.
+* The conversation id is set with `sentry_sdk.ai.set_conversation_id`, which needs
+  **`sentry-sdk>=2.64`**; the worker pins **2.69.1** for that reason (and for
+  `stream_gen_ai_spans`, which is what sends `gen_ai` spans in the format the LLM
+  views read). The api and serving images keep 2.19.2: they open no `gen_ai` spans.
+* **The scripted fallback emits no model span** — it calls no model. Its agent span
+  is named `invoke_agent ml-lifecycle-investigator [scripted policy, no model call]`
+  and carries `agent.producer=scripted-policy`, so a policy can never be mistaken
+  for a model in the dashboard.
+* Agent spans are opened **in the activity, never in the workflow**: the Temporal
+  workflow sandbox forbids importing `sentry_sdk`, so no span may be opened for a
+  whole run from `workflows.py`. The longest-lived span an activity can honestly own
+  is one step, and the conversation is what ties the steps together.
+
+To see it: **Explore → Traces**, query `op:gen_ai.invoke_agent` (or
+`gen_ai.conversation.id:agent-<hex>` for one run), environment `development`.
+**Explore → Conversations** groups the same spans by conversation, but it
+reconstructs the chat from the `gen_ai.input.messages` / `gen_ai.output.messages`
+attributes, so it renders empty without content capture — off in the code, on for
+this demo's worker (below).
+
+### Content capture (prompts and answers)
+
+The **code** default is off: `services/worker/main.py` reads
+`SENTRY_SEND_DEFAULT_PII=0` unless told otherwise, so a deployment that configures
+nothing captures no content. **This demo's worker turns it on** in
+`docker-compose.yml` (`SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-1}`)
+because the Conversations timeline is empty without it.
+
+What is captured here: the operator's goal, the transcript digests the agent read
+(registry stages and metrics, evaluation results), and the model's answer —
+recorded as `gen_ai.system_instructions`, `gen_ai.input.messages` and
+`gen_ai.output.messages` on the `gen_ai.chat` span. This demo has no end-user
+content to leak; a deployment that handles real user data should decide
+deliberately rather than inherit this. Environment: `development`.
+
+Turn it off for the worker with one line:
+
+```bash
+SENTRY_SEND_DEFAULT_PII=0 docker compose up -d worker
+```
+
+Grouping is unaffected either way: conversations are keyed by
+`gen_ai.conversation.id`, which every span carries regardless of this setting.
+
 ## Environment variables
 
 | Var | Default | Note |
 |---|---|---|
 | `SENTRY_DSN` | *(empty)* | Set a real DSN to enable Sentry capture |
-| `SENTRY_TRACES_SAMPLE_RATE` | `1.0` | Worker only: sample rate for the agent's LLM spans (the api keeps its own `0.25`) |
+| `SENTRY_TRACES_SAMPLE_RATE` | `1.0` | Worker only: sample rate for the agent's agent+LLM spans (the api keeps its own `0.25`) |
+| `SENTRY_SEND_DEFAULT_PII` | `0` in code, `1` for this demo's worker | Capture prompts/outputs (`gen_ai.input.messages` etc). Needed for the Conversations view; the code default stays off so a silent deployment captures nothing |
 | `JWT_SECRET` | `change-me-in-prod` | **Set this.** Signs the auth JWT |
 | `SEED_OPERATOR_PASSWORD` / `SEED_ADMIN_PASSWORD` | dev presets | Seed logins |
 
