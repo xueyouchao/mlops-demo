@@ -68,9 +68,8 @@ docker compose --profile tools run --rm trainer
 ```
 This seed trainer trains a **GradientBoosting** classifier on Breast Cancer
 Wisconsin, logs the run + lineage (data hash, dataset, params) to MLflow,
-registers a version, and auto-stages it (awaiting the human production gate). It
-is the one entry point that stays **gradient-boosting only** — it has no family
-selector, and it does not pretend to have one.
+registers a version, and auto-stages it (awaiting the human production gate). It is
+the one entry point with no family selector.
 
 **Or retrain from the console:** the **Ops Console** has a *Train a candidate*
 panel — pick an estimator family (`gradient_boosting` or `logistic_regression`)
@@ -83,9 +82,10 @@ version lands in **Staging**. Training never edits an existing version —
 `ModelVersion` is immutable by design, so a retrain is always a new version
 number.
 
-So the seed script and the console panel reach the **same trainer** but do not
-offer the same choice: the console panel picks an estimator family, the seed
-script is gradient-boosting only. See *Two estimator families, one trainer* below.
+Both human entry points reach the **same trainer** and the same registry, but only
+the console's panel lets a person *choose the family*: the seed script trains
+gradient boosting and says so, rather than implying that is all a human can train.
+See *Two estimator families, one trainer* below.
 
 **Two estimator families, one trainer.** The agent's `train_candidate` tool takes a
 `model_kind` plus *that kind's* parameters, validated per kind — and a human makes
