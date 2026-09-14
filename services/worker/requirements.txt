@@ -1,6 +1,11 @@
 temporalio==1.5.0
 mlflow==2.14.3
-sentry-sdk==2.19.2
+# 2.69.1, not the 2.19.2 the other images pin: agent traces and conversations
+# need `sentry_sdk.ai.set_conversation_id` and `stream_gen_ai_spans`, and neither
+# exists at 2.19.2 (`set_conversation_id` lands in 2.64.0, the option in 2.60.0).
+# The worker is the only image that opens `gen_ai` spans, so it is the only pin
+# that had to move; api and serving keep 2.19.2 and their own tracing behaviour.
+sentry-sdk==2.69.1
 pydantic==2.10.4
 numpy<2
 # Pinned explicitly: scikit-learn otherwise arrives transitively via mlflow and

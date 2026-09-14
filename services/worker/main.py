@@ -38,6 +38,19 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 # without touching the code. The api keeps its own, separate 0.25.
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "1.0"))
 
+# Prompt and output capture is a *privacy* decision, not a technical one, so it
+# is off by default and the operator turns it on. Python's SDK gates
+# `gen_ai.input.messages` / `gen_ai.output.messages` behind `send_default_pii`,
+# and Explore > Conversations reconstructs the chat from exactly those
+# attributes — so without this the conversation is still grouped (the run's
+# `gen_ai.conversation.id` is set either way) but its timeline renders empty.
+# What would be captured here is the operator's goal and the registry/metric
+# digests the agent read, not end-user content. `SENTRY_SEND_DEFAULT_PII=1`
+# enables it for a deployment whose privacy policy allows it.
+SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "0").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
 
 async def main() -> None:
     if SENTRY_DSN:
@@ -46,6 +59,13 @@ async def main() -> None:
             dsn=SENTRY_DSN,
             environment=os.getenv("SENTRY_ENV", "development"),
             traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+            # Explicit, though it is the default from 2.64 on: it is why the
+            # agent and model spans travel as their own envelope items in the
+            # format the Sentry LLM views read, instead of riding inside a
+            # transaction payload. Stated here so that a future default cannot
+            # change the shape silently.
+            stream_gen_ai_spans=True,
+            send_default_pii=SENTRY_SEND_DEFAULT_PII,
         )
 
     client = await Client.connect(f"{TEMPORAL_HOST}:{TEMPORAL_PORT}")

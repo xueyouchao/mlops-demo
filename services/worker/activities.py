@@ -175,5 +175,15 @@ def brain_decide(payload: dict) -> dict:
 
     Parsing is deliberately tolerant: an unknown tool name comes back as-is,
     because checking it against the allow-list is the workflow's job.
+
+    The workflow id is handed in as the run's Sentry identity, and it is the
+    *activity* that reads it — not the workflow. `workflows.py` may not import
+    `sentry_sdk` (the sandbox forbids the non-determinism), so the id is read
+    here, where spans are actually opened, and becomes the conversation id that
+    groups every step of one investigation.
     """
-    return brain.decide(payload["goal"], payload.get("transcript") or [])
+    return brain.decide(
+        payload["goal"],
+        payload.get("transcript") or [],
+        run_id=activity.info().workflow_id,
+    )
