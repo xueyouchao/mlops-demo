@@ -157,6 +157,11 @@ def approve(version_id: str, workflow_id: str | None = None, approved: bool = Tr
 
 @router.post("/rollback")
 def rollback(to_version_id: str, user=Depends(require_role("operator", "admin"))):
+    # A rollback is a promotion towards an older version, so it owes the same
+    # check _assert_servable makes on the way up. It was the one path without it,
+    # and one click put production on v1, whose artifact is gone — the exact
+    # failure _assert_servable's docstring describes, through the other door.
+    _assert_servable(to_version_id)
     _lc().rollback(to_version_id, actor=user["username"])
     sync_rollback(to_version_id)
     return {"ok": True, "rolled_back_to": to_version_id}

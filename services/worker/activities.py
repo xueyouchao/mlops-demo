@@ -76,6 +76,15 @@ def rollback_stage(payload: dict) -> dict:
     """Blue-green flip: send traffic back to a prior version."""
     name = payload["model_name"]
     version = int(payload["version_id"])
+    # Same invariant as promote: nothing unservable goes live. A rollback is a
+    # promotion towards an older version, and it was the one path without this
+    # check -- which is how production ended up on v1, a version whose artifact is
+    # gone, from a single click in the console.
+    problem = artifact_problem(MLFLOW_TRACKING_URI, name, str(version))
+    if problem:
+        raise ApplicationError(
+            f"refusing to roll back to version {version}: {problem}", non_retryable=True
+        )
     try:
         # archive_existing_versions matters here as much as in promote: without it
         # MLflow leaves the displaced version in the Production stage forever, so
