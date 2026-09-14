@@ -66,3 +66,16 @@ The reason is a measurement, not a preference. On the operator's chosen brain (`
 Where it lands: the brain activity lifts `why` back **out** of the arguments before returning, so what the workflow validates and the tools execute is exactly the schemas above. The lifted sentence becomes the step's `rationale` — which is what the console renders, so the demo's "why" survives a model that does not narrate.
 
 Cost, stated plainly: a required argument is one more thing a model can get wrong, and `propose_promotion` now carries two rationales — its own `rationale` argument (for the operator, about the *version*) and the step's `why` (for the viewer, about the *call*). They answer different questions, and both are deliberate.
+
+## Amendment — 2026-09-14: `train_candidate`'s arguments became a `model_kind` and a parameter object
+
+Decision 1's table gave `train_candidate` **three fixed numeric arguments** (`n_estimators`, `max_depth`, `learning_rate`). They are now a **`model_kind` plus a per-kind validated `params` object**, because three fixed numbers for one estimator is a *trainer* shape rather than a *tool* shape: with it, "try a different kind of model" is not a call the agent can make, no version can say which family it came from, and an incumbent's hyperparameters do not tell a reader whether the search space has been explored or merely re-tuned.
+
+The surface itself is unchanged: still six tools, same names, one call per decision, `why` required on every call (the earlier amendment stands), and no tool that approves a promotion or rolls back production.
+
+Two things this amendment does add, and why they are not the tool-surface drifting:
+
+- **The kind is a first-class part of a training call**, so `params` is validated **per kind** — unknown kinds, another kind's parameters, out-of-range values and non-numbers all come back as *verdicts* naming what that kind actually takes. A strict interface is only safe when a wrong call is a one-step correction rather than a failed run; that is the same reasoning behind tolerating `v6` for `6`, and it is why the tool description is *generated from* the kinds rather than written beside them.
+- **Idempotency is now keyed on dataset + `model_kind` + params** (decision 4's lookup keyed on the data and the three numbers). Versions trained before the kind existed *are* gradient-boosting versions, so the lookup treats an absent `model_kind` as that kind and a repeat across the change reuses the existing version instead of registering a twin.
+
+`read_run_metrics` reports the incumbent's kind and parameters through the same change, which is what makes a deliberately different family a decision the agent can take on evidence. The cap, the servability pre-check, the typed verdicts, the read-only boundary and the six-tool count are all untouched.

@@ -135,6 +135,93 @@ check("both producers hand the workflow clean arguments (no `why` key)",
       all("why" not in brain.scripted_decision("g", good[:i])["arguments"] for i in range(len(good))))
 
 # --------------------------------------------------------------------------
+print("\nthe train_candidate interface (a model_kind and its parameters)")
+# What the model is told, and what validates what it sends, must be the same
+# thing — the schema is generated from `model_kinds`, so this is the check that
+# the two halves of the interface cannot drift apart.
+mk = brain.model_kinds
+TRAIN_TOOL = next(t["function"] for t in brain.TOOL_SCHEMAS
+                  if t["function"]["name"] == "train_candidate")
+TRAIN_ARGS = TRAIN_TOOL["parameters"]
+
+check("train_candidate takes a model_kind and one parameter object (plus `why`)",
+      sorted(TRAIN_ARGS["properties"]) == ["model_kind", "params", "why"]
+      and TRAIN_ARGS["required"] == ["model_kind", "params", "why"],
+      str((sorted(TRAIN_ARGS["properties"]), TRAIN_ARGS["required"])))
+check("the three fixed hyperparameters are no longer top-level arguments",
+      not {"n_estimators", "max_depth", "learning_rate"} & set(TRAIN_ARGS["properties"]))
+check("its kind enum is the trainer's own list, not a copy of it",
+      TRAIN_ARGS["properties"]["model_kind"]["enum"] == mk.kind_names()
+      == ["gradient_boosting", "logistic_regression"],
+      str(TRAIN_ARGS["properties"]["model_kind"]))
+check("the parameter object offers exactly the kinds' parameters, and no others",
+      set(TRAIN_ARGS["properties"]["params"]["properties"])
+      == {"n_estimators", "max_depth", "learning_rate", "C", "max_iter"},
+      str(sorted(TRAIN_ARGS["properties"]["params"]["properties"])))
+check("and each property says which kind it belongs to, with its bounds and default",
+      all(kind in TRAIN_ARGS["properties"]["params"]["properties"][name]["description"]
+          and "default" in TRAIN_ARGS["properties"]["params"]["properties"][name]["description"]
+          for kind, names in (("gradient_boosting", ("n_estimators", "max_depth", "learning_rate")),
+                              ("logistic_regression", ("C", "max_iter")))
+          for name in names),
+      str(TRAIN_ARGS["properties"]["params"]["properties"]))
+check("the description names both kinds, so the model can actually choose one",
+      all(kind in TRAIN_TOOL["description"] for kind in mk.kind_names()))
+check("the system prompt says there are two families to choose between",
+      "two estimator families" in brain.SYSTEM_PROMPT)
+
+check("an omitted parameter takes its kind's default — the trainer's original numbers",
+      mk.coerce("gradient_boosting", None)[0]
+      == {"n_estimators": 120, "max_depth": 3, "learning_rate": 0.08},
+      str(mk.coerce("gradient_boosting", None)))
+check("the second kind's defaults are its own, not gradient boosting's",
+      mk.coerce("logistic_regression", {})[0] == {"C": 1.0, "max_iter": 200},
+      str(mk.coerce("logistic_regression", {})))
+check("a parameter object that arrives as a JSON string is accepted",
+      mk.coerce("logistic_regression", '{"C": 2, "max_iter": 500}')[0] == {"C": 2.0, "max_iter": 500},
+      str(mk.coerce("logistic_regression", '{"C": 2, "max_iter": 500}')))
+check("a whole number given as a float is accepted; a fractional one is not",
+      mk.coerce("logistic_regression", {"max_iter": 500.0})[0]["max_iter"] == 500
+      and mk.coerce("logistic_regression", {"max_iter": 500.5})[0] is None,
+      str(mk.coerce("logistic_regression", {"max_iter": 500.5})))
+check("an unknown kind is refused by name, and the real ones are listed",
+      (lambda r: r[0] is None and "random_forest" in r[1] and "logistic_regression" in r[1])(
+          mk.coerce("random_forest", {})), str(mk.coerce("random_forest", {})))
+check("another kind's parameters are refused rather than silently ignored",
+      (lambda r: r[0] is None and "n_estimators" in r[1] and "C, max_iter" in r[1])(
+          mk.coerce("logistic_regression", {"n_estimators": 300})),
+      str(mk.coerce("logistic_regression", {"n_estimators": 300})))
+check("an out-of-range value is refused, with the bounds in the message",
+      (lambda r: r[0] is None and "1 and 10" in r[1])(
+          mk.coerce("gradient_boosting", {"max_depth": 40})),
+      str(mk.coerce("gradient_boosting", {"max_depth": 40})))
+check("a value that is not a number is refused instead of becoming a guess",
+      mk.coerce("logistic_regression", {"max_iter": "many"})[0] is None
+      and mk.coerce("gradient_boosting", {"learning_rate": "fast"})[0] is None)
+check("nan is refused too (it passes every comparison a bound makes)",
+      (lambda r: r[0] is None and "finite" in r[1])(mk.coerce("logistic_regression", {"C": float("nan")})),
+      str(mk.coerce("logistic_regression", {"C": float("nan")})))
+check("every kind's own defaults validate (nothing offered is unusable)",
+      all(mk.coerce(kind, mk.default_params(kind))[1] is None for kind in mk.kind_names()))
+
+check("the scripted probe is a call the trainer accepts, in the new shape",
+      mk.coerce(brain.SCRIPTED_PROBE["model_kind"], brain.SCRIPTED_PROBE["params"])[1] is None
+      and brain.SCRIPTED_PROBE["model_kind"] in mk.kind_names(), str(brain.SCRIPTED_PROBE))
+d = brain.scripted_decision("goal", good[:2])
+check("the policy's training call carries the new interface, with no flat knobs",
+      d["tool"] == "train_candidate" and set(d["arguments"]) == {"model_kind", "params"}
+      and not {"n_estimators", "max_depth", "learning_rate"} & set(d["arguments"]), str(d))
+check("so AGENT_FALLBACK=on still trains exactly one candidate",
+      [brain.scripted_decision("goal", good[:i])["tool"] for i in range(len(good) + 1)]
+      .count("train_candidate") == 1)
+check("and the policy can still read a trained version out of the new digest",
+      brain._trained_version(good[:2] + [{
+          "step": 3, "tool": "train_candidate", "arguments": {}, "rationale": "",
+          "observation": "v6 registered in Staging · logistic_regression · accuracy 0.9561 · "
+                         "roc_auc 0.9914 · run 95283110 · artifact present",
+          "producer": "model"}]) == "6")
+
+# --------------------------------------------------------------------------
 print("\nproducer selection")
 os.environ["AGENT_FALLBACK"] = "on"
 d = brain.decide("goal", [])
@@ -436,6 +523,51 @@ check("and the conversation id is still there beside the content",
            pii_agent and pii_agent[0].data.get("gen_ai.conversation.id"))))
 check("the decision is unchanged by capturing it",
       d_pii.get("ok") and d_pii.get("tool") == "read_registry", str(d_pii))
+
+# The new trainer interface through the *same* span path: a decision that carries a
+# nested `params` object is the part that could quietly lose its shape on the way
+# into history, and a step whose arguments arrive flattened would be a step the tool
+# refuses for reasons the transcript cannot explain.
+TRAIN_REPLY = {
+    "model": "deepseek-v4.1-flash", "done_reason": "stop",
+    "prompt_eval_count": 934, "eval_count": 96,
+    "message": {"tool_calls": [
+        {"function": {"name": "train_candidate", "arguments": {
+            "model_kind": "logistic_regression",
+            "params": {"C": 2, "max_iter": 500},
+            "why": "a linear model is the honest contrast to the trees that are serving"}}}]},
+}
+brain._post_json = lambda url, payload, timeout_s, attempts=2: TRAIN_REPLY
+train_pii = FakeSentry(pii=True)
+brain.sentry_sdk = train_pii
+brain.sdk_ai = train_pii.ai
+d_train = brain.decide("goal", good, DECIDE_CONFIG, run_id=RUN_ID)
+train_agent = [c for t in train_pii.transactions for c in t.children]
+train_model = [c for a in train_agent for c in a.children]
+train_carried = train_model[0].data if train_model else {}
+
+check("a train_candidate step is one agent span and one model span, like any other",
+      len(train_agent) == 1 and len(train_model) == 1
+      and train_agent[0].op == "gen_ai.invoke_agent" and train_model[0].op == "gen_ai.chat",
+      str([(a.op, [m.op for m in a.children]) for a in train_agent]))
+check("the decision reaches the workflow with its kind and its params intact",
+      d_train.get("ok") and d_train.get("tool") == "train_candidate"
+      and d_train["arguments"] == {"model_kind": "logistic_regression",
+                                   "params": {"C": 2, "max_iter": 500}},
+      str(d_train))
+check("the recorded answer carries the nested params object, not a flattened copy",
+      (lambda m: bool(m) and m[0]["parts"][0]["arguments"]["params"] == {"C": 2, "max_iter": 500}
+       and m[0]["parts"][0]["arguments"]["model_kind"] == "logistic_regression")(
+          json.loads(train_carried.get("gen_ai.output.messages") or "null")),
+      str(train_carried.get("gen_ai.output.messages"))[:200])
+check("and the conversation id is still set on that step",
+      train_agent and train_agent[0].data.get("gen_ai.conversation.id") == RUN_ID,
+      str(train_agent and train_agent[0].data))
+check("the call this model returned passes the trainer's own per-kind validation",
+      mk.coerce(d_train["arguments"]["model_kind"], d_train["arguments"]["params"])[1] is None)
+brain._post_json = lambda url, payload, timeout_s, attempts=2: OLLAMA_REPLY
+brain.sentry_sdk = fake
+brain.sdk_ai = fake.ai
 
 # A client that cannot even be asked must read as "off", never as a crash.
 class MuteClient:

@@ -47,6 +47,11 @@ try:  # optional, exactly as in activities.py: the parser stays usable without i
 except Exception:
     sentry_sdk = None
 
+# The estimator kinds the trainer offers, imported from the one module that owns
+# them so the tool schema below *is* the trainer's vocabulary rather than a copy
+# of it. Stdlib-only at import time, like this module — see model_kinds.py.
+import model_kinds
+
 try:  # sentry-sdk >= 2.64: `set_conversation_id` / `set_data_normalized`
     import sentry_sdk.ai as sdk_ai
 except Exception:
@@ -124,12 +129,17 @@ TOOL_SCHEMAS = [
         {"version": {"type": "string", "description": "model version number"}},
         ["version"]),
     _fn("train_candidate",
-        "Train and register a NEW version in Staging from these hyperparameters. Costs about 20 "
-        "seconds and one registry entry; an existing version is never modified.",
-        {"n_estimators": {"type": "integer"},
-         "max_depth": {"type": "integer"},
-         "learning_rate": {"type": "number"}},
-        ["n_estimators", "max_depth", "learning_rate"]),
+        "Train and register a NEW version in Staging. You choose the estimator family with "
+        "`model_kind` and hand over exactly that kind's parameters in `params`. "
+        + model_kinds.describe()
+        + " Costs seconds to about half a minute and one registry entry; an existing version is "
+          "never modified, and repeating the same kind with the same parameters reuses the "
+          "version it already registered.",
+        {"model_kind": {"type": "string", "enum": model_kinds.kind_names(),
+                        "description": "which estimator family to train; it decides which "
+                                       "parameters `params` must carry"},
+         "params": model_kinds.params_schema()},
+        ["model_kind", "params"]),
     _fn("propose_promotion",
         "File a promotion request for a version. This does NOT promote anything: it asks the "
         "operator, who decides. Only one promotion may be pending per model.",
@@ -152,6 +162,7 @@ You work one step at a time. On each step you call exactly ONE tool and say why 
 Rules:
 - You have at most 8 steps in total. Spend them deliberately.
 - You may read the registry, read a run's metrics, evaluate a version, train one candidate, and file a promotion request.
+- `train_candidate` offers two estimator families (its `model_kind`); pick one deliberately and give that kind's parameters in `params`, not another kind's.
 - You may NOT approve a promotion and you may NOT roll back production. Those decisions belong to the operator.
 - Exactly one promotion may be pending per model, so propose once.
 - Never call the same tool with the same arguments twice in a row: the run is ended as no_progress if you do.
@@ -745,7 +756,12 @@ def ask_model(goal: str, entries: list, config: dict, agent: _Span | None = None
 # Interface note: this policy reads the *observation digests* to find the
 # production version and the accuracy numbers, so those digests must keep
 # naming the stage ("Production") and the metrics ("accuracy", "roc_auc").
-SCRIPTED_PROBE = {"n_estimators": 300, "max_depth": 6, "learning_rate": 0.05}
+# The probe names a kind and that kind's parameters, like any other call to the
+# tool: the policy trains exactly one candidate, and it must be a call the tool
+# accepts or the fallback would burn a step discovering that. Same numbers as
+# before the interface changed, so the scripted run behaves as it always has.
+SCRIPTED_PROBE = {"model_kind": "gradient_boosting",
+                  "params": {"n_estimators": 300, "max_depth": 6, "learning_rate": 0.05}}
 _ACCURACY_RE = re.compile(r"accuracy\s*[:=]?\s*([0-9]*\.?[0-9]+)", re.I)
 _VERSION_RE = re.compile(r"\bv?(\d+)\b")
 

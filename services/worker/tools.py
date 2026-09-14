@@ -39,6 +39,7 @@ from ml_platform.registry_health import artifact_problem
 # re-stated: comparability of numbers depends on it, and `_data_hash` is what
 # makes a retried training recognisable as the same training.
 from activities import RANDOM_STATE, TEST_SIZE, _data_hash, train_and_register
+import model_kinds
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
 SERVING_URL = os.getenv("SERVING_URL", "http://serving:8001").rstrip("/")
@@ -184,7 +185,12 @@ def read_run_metrics(payload: dict) -> dict:
     if run.info.start_time and run.info.end_time:
         duration_s = round((run.info.end_time - run.info.start_time) / 1000, 1)
 
-    wanted = ["n_estimators", "max_depth", "learning_rate", "random_state", "test_size", "data_hash", "requested_by"]
+    # The kind's own parameters first, then the lineage the trainer always logs: one
+    # digest shape for both kinds, so the brain reads an incumbent's hyperparameters
+    # the same way whichever estimator produced it.
+    kind = str(params.get("model_kind") or model_kinds.DEFAULT_KIND)
+    wanted = ["model_kind", *model_kinds.param_names(kind),
+              "random_state", "test_size", "data_hash", "requested_by"]
     param_text = " ".join(f"{k}={params[k]}" for k in wanted if k in params)
     metric_text = " ".join(f"{k}={_fmt(v)}" for k, v in sorted(metrics.items()))
     digest = f"run {run_id[:8]} ({run.data.tags.get('mlflow.runName', 'unnamed')}) · params {param_text} · metrics {metric_text}"
@@ -266,7 +272,8 @@ def evaluate_version(payload: dict) -> dict:
 # --------------------------------------------------------------------------
 # train_candidate
 # --------------------------------------------------------------------------
-def _version_already_trained(client: MlflowClient, params: dict, data_hash: str) -> str | None:
+def _version_already_trained(client: MlflowClient, kind: str, params: dict,
+                             data_hash: str) -> str | None:
     """The version this exact training already produced, if it exists.
 
     This is what makes a killed-and-retried step harmless. Training is the one
@@ -274,43 +281,59 @@ def _version_already_trained(client: MlflowClient, params: dict, data_hash: str)
     the top — so without this lookup a mistimed kill leaves two versions where
     the demo claims one. The lookup is on the run's own logged parameters, which
     `train_and_register` writes before it registers anything.
+
+    Keyed on the **dataset, the kind and that kind's parameters** — the three
+    things that decide what the fitted model is. `model_kind` is compared in Python
+    rather than in the filter for a migration reason: versions trained before the
+    kind was a parameter carry no `model_kind` at all, and they *are* the
+    gradient-boosting kind they were, so a repeat across that change reuses the
+    existing version instead of registering a twin. Parameter names do not overlap
+    between the kinds, but the check is explicit anyway — reusing the wrong
+    version is worse than training again.
     """
     experiment = client.get_experiment_by_name(MODEL_NAME)
     if experiment is None:
         return None
-    clause = " and ".join([
-        f"params.data_hash = '{data_hash}'",
-        f"params.n_estimators = '{params['n_estimators']}'",
-        f"params.max_depth = '{params['max_depth']}'",
-        f"params.learning_rate = '{params['learning_rate']}'",
-    ])
+    clause = " and ".join(
+        [f"params.data_hash = '{data_hash}'"]
+        + [f"params.{name} = '{value}'" for name, value in params.items()]
+    )
     try:
         runs = client.search_runs([experiment.experiment_id], filter_string=clause,
-                                  order_by=["attributes.start_time DESC"], max_results=1)
+                                  order_by=["attributes.start_time DESC"], max_results=5)
     except MlflowException:
         return None
-    if not runs:
-        return None
-    run_id = runs[0].info.run_id
-    existing = client.search_model_versions(f"name='{MODEL_NAME}' and run_id='{run_id}'")
-    return str(existing[0].version) if existing else None
+    for run in runs:
+        logged = dict(run.data.params)
+        if logged.get("model_kind", model_kinds.DEFAULT_KIND) != kind:
+            continue
+        if any(logged.get(name) != str(value) for name, value in params.items()):
+            continue
+        existing = client.search_model_versions(
+            f"name='{MODEL_NAME}' and run_id='{run.info.run_id}'"
+        )
+        return str(existing[0].version) if existing else None
+    return None
 
 
 @activity.defn
 def train_candidate(payload: dict) -> dict:
     """Train and register a candidate in Staging, reusing the trainer unchanged.
 
-    Idempotent on (data, hyperparameters): a retry of the same step returns the
-    version the first attempt registered instead of registering a second one.
+    One tool, two estimator families: the model picks `model_kind` and hands over
+    that kind's parameters, which `model_kinds` validates per kind. A kind or a
+    parameter this trainer does not have comes back as a **verdict** naming what it
+    does have, so the brain corrects the call in one step instead of the run
+    failing on a typo — the same treatment an unknown version gets.
+
+    Idempotent on (dataset, model_kind, params): a retry of the same step returns
+    the version the first attempt registered instead of registering a second one.
     """
-    try:
-        params = {
-            "n_estimators": int(payload["n_estimators"]),
-            "max_depth": int(payload["max_depth"]),
-            "learning_rate": float(payload["learning_rate"]),
-        }
-    except (KeyError, TypeError, ValueError) as e:
-        return _verdict("bad_arguments", f"train_candidate needs n_estimators, max_depth and learning_rate: {e}")
+    kind = str(payload.get("model_kind") or "").strip()
+    params, problem = model_kinds.coerce(kind, payload.get("params"))
+    if problem:
+        return _verdict("bad_arguments", f"train_candidate refused this call: {problem}")
+    kind = kind or model_kinds.DEFAULT_KIND
 
     attempt = int(payload.get("attempt") or 0)
     if attempt >= MAX_TRAININGS_PER_RUN:
@@ -325,37 +348,40 @@ def train_candidate(payload: dict) -> dict:
     data_hash = _data_hash(data.data, data.target)
 
     client = _client()
-    existing = _version_already_trained(client, params, data_hash)
+    existing = _version_already_trained(client, kind, params, data_hash)
     if existing:
         # A version *row* is not a trained model. A kill during an earlier training
         # can leave the row in the registry with no artifact — seven of them in one
         # rehearsal — and handing that back as "reused" is how a run spends its
         # steps evaluating nothing and then concludes that production cannot be
         # beaten. Reuse only a version that has something to load. Otherwise train
-        # again: the run id is fixed by the hyperparameters and the data, so
-        # re-logging the model repairs the *same* run instead of creating a second
-        # one, and an interrupted training heals itself on the next attempt.
+        # again: a fresh run id is logged with the same parameters, so an
+        # interrupted training heals itself on the next attempt.
         problem = artifact_problem(MLFLOW_TRACKING_URI, MODEL_NAME, existing)
         if not problem:
             metrics = _run_metrics(client, client.get_model_version(MODEL_NAME, existing).run_id)
             return _ok(
-                f"v{existing} already exists for exactly these hyperparameters and this data — "
-                f"reused, no new version registered · accuracy {_fmt(metrics.get('accuracy'))}",
-                version=existing, stage="Staging", resumed=True, metrics=metrics, params=params,
+                f"v{existing} already exists for exactly this model_kind and these parameters on "
+                f"this data — reused, no new version registered · {kind} · "
+                f"accuracy {_fmt(metrics.get('accuracy'))}",
+                version=existing, stage="Staging", resumed=True, metrics=metrics,
+                model_kind=kind, params=params,
             )
 
     result = train_and_register({
         "model_name": MODEL_NAME,
-        **params,
+        "model_kind": kind,
+        "params": params,
         "requested_by": payload.get("requested_by") or "agent",
     })
     digest = (
-        f"v{result['version']} registered in Staging · accuracy {result['accuracy']} · "
-        f"roc_auc {result['roc_auc']} · run {result['run_id'][:8]} · artifact present"
+        f"v{result['version']} registered in Staging · {result.get('model_kind', kind)} · "
+        f"accuracy {result['accuracy']} · roc_auc {result['roc_auc']} · "
+        f"run {result['run_id'][:8]} · artifact present"
     )
     return _ok(digest, version=str(result["version"]), stage=result.get("stage", "Staging"),
                run_id=result["run_id"], metrics={"accuracy": result["accuracy"], "roc_auc": result["roc_auc"]},
-               params=params, resumed=False)
+               model_kind=result.get("model_kind", kind), params=params, resumed=False)
 
 
 # --------------------------------------------------------------------------
