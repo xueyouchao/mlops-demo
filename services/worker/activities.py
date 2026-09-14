@@ -77,7 +77,13 @@ def rollback_stage(payload: dict) -> dict:
     name = payload["model_name"]
     version = int(payload["version_id"])
     try:
-        _client().transition_model_version_stage(name, version, "Production")
+        # archive_existing_versions matters here as much as in promote: without it
+        # MLflow leaves the displaced version in the Production stage forever, so
+        # the console showed two rows badged production and one of them with 0%
+        # traffic. Stages are not exclusive unless you ask.
+        _client().transition_model_version_stage(
+            name, version, "Production", archive_existing_versions=True
+        )
         return {"version": version, "stage": "Production", "rolled_back": True}
     except Exception as e:
         _capture(e)

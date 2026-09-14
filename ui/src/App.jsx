@@ -266,14 +266,24 @@ function InlineConsole({ data, error, call, refresh }) {
             <tr><th>id</th><th>stage</th><th>run</th><th>traffic %</th></tr>
           </thead>
           <tbody>
-            {(data?.models?.versions || []).map((v) => (
-              <tr key={v.version_id}>
-                <td>{v.version_id}</td>
-                <td className={`stage-${v.stage}`}>{v.stage}</td>
-                <td>{v.run_id}</td>
-                <td>{weights[v.version_id] ?? 0}</td>
-              </tr>
-            ))}
+            {(data?.models?.versions || []).map((v) => {
+              // Label a version by whether it serves, not by MLflow's stage. Traffic
+              // comes from the routing table, which is the source of truth; the stage
+              // is registry history, and a rollback used to leave the displaced
+              // version wearing "Production" while nothing routed to it — two rows
+              // badged production, one at 0%. "retired" says that out loud instead of
+              // showing a second production that is not serving anything.
+              const serving = (weights[v.version_id] ?? 0) > 0;
+              const label = serving ? "serving" : v.stage === "Production" ? "retired" : v.stage;
+              return (
+                <tr key={v.version_id}>
+                  <td>{v.version_id}</td>
+                  <td className={`stage-${serving ? "Production" : v.stage}`}>{label}</td>
+                  <td>{v.run_id}</td>
+                  <td>{weights[v.version_id] ?? 0}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </section>
