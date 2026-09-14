@@ -108,9 +108,76 @@ curl -sS -c "$JAR" -X POST "$API_URL/auth/token" \
 # never reaches the gate — which is how a rehearsal that approves every pass walks
 # production from v7 to v19 and then cannot find a gate anywhere. Pinning puts the
 # question back: is there something better than what is serving?
+#
+#   DEMO_INCUMBENT=7         pin v7, the number you chose
+#   DEMO_INCUMBENT=weakest   let the script pick: the servable version with the
+#                            lowest recorded roc_auc (step 0 of docs/demo-script.md)
+#
+# `weakest` is the same mechanism with the number chosen for you, because the
+# number is the whole problem: against a strong incumbent the agent honestly
+# concludes that nothing beats production and the gate is unreachable on demand.
+# It picks by *score*, from a version that is really registered and really
+# servable — not a magic number — so what the run finds is a genuinely weak model
+# rather than a rigged comparison.
 if [ -n "${DEMO_INCUMBENT:-}" ]; then
-  PIN=$(curl -sS -b "$JAR" -X POST "$API_URL/api/models/rollback?to_version_id=$DEMO_INCUMBENT" 2>/dev/null)
-  note "pinned the incumbent -> v$DEMO_INCUMBENT  ($PIN)"
+  PIN=$DEMO_INCUMBENT
+  if [ "$PIN" = "weakest" ]; then
+    PICK=$(timeout 90 docker exec -i mlops-demo-api python3 - <<'PY'
+import os
+
+from mlflow.tracking import MlflowClient
+from ml_platform.registry_health import artifact_problem
+
+name = "breast-cancer-classifier"
+uri = os.environ.get("MLFLOW_TRACKING_URI", "http://mlflow:5000")
+client = MlflowClient()
+scored = []
+for v in client.search_model_versions(f"name='{name}'"):
+    # Servable first, by the product's own rule rather than a second opinion
+    # invented here: a version whose artifact is gone cannot serve traffic, so it
+    # cannot be the incumbent a run argues against.
+    if artifact_problem(uri, name, str(v.version)):
+        continue
+    # The honest score is the version's *own recorded* roc_auc — the number its
+    # training run logged on the held-out split `evaluate_version` reuses, so it
+    # is comparable with whatever the agent measures later. Nothing is invented,
+    # and nothing is re-measured: re-scoring forty versions would take minutes.
+    try:
+        auc = float(dict(client.get_run(v.run_id).data.metrics)["roc_auc"])
+    except Exception:
+        continue
+    scored.append((auc, int(v.version)))
+if not scored:
+    print("  no servable version carries a recorded roc_auc — the incumbent cannot be chosen for you")
+else:
+    scored.sort()  # weakest first; a tie goes to the older version, so the pick is deterministic
+    auc, version = scored[0]
+    print(f"  {len(scored)} servable versions carry a recorded roc_auc")
+    print(f"  weakest   v{version} roc_auc {auc:.4f}  <- picked as the incumbent")
+    print(f"  strongest v{scored[-1][1]} roc_auc {scored[-1][0]:.4f}")
+    print(f"PIN={version}")
+PY
+)
+    printf '%s\n' "$PICK" | grep -v '^PIN=' | grep -v '^$'
+    PIN=$(printf '%s\n' "$PICK" | sed -n 's/^PIN=//p' | tail -n1)
+  fi
+  if [ -n "$PIN" ]; then
+    # Pin only when the pick is not already serving. A reset that re-pins the same
+    # weak incumbent — the normal case, since `weakest` is a function of the
+    # registry and returns the same version every time — would otherwise re-run a
+    # rollback to the version already live: it moves nothing, writes a "rolled back
+    # from v18 to v18" audit event, and re-transitions MLflow for no reason.
+    SERVING_NOW=$(curl -sS -b "$JAR" "$API_URL/api/models/routing" 2>/dev/null \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin).get("production") or "")' 2>/dev/null)
+    if [ "$SERVING_NOW" = "$PIN" ]; then
+      note "v$PIN is already serving production — nothing to move"
+    else
+      OUT=$(curl -sS -b "$JAR" -X POST "$API_URL/api/models/rollback?to_version_id=$PIN" 2>/dev/null)
+      note "pinned the incumbent -> v$PIN  ($OUT)"
+    fi
+  else
+    warn "DEMO_INCUMBENT=weakest found no version to pin — refusing to guess one"
+  fi
 fi
 ROUTING=$(curl -sS -b "$JAR" "$API_URL/api/models/routing" 2>/dev/null)
 MODELS=$(curl -sS -b "$JAR" "$API_URL/api/models" 2>/dev/null)

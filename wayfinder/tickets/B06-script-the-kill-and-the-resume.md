@@ -74,3 +74,59 @@ presenter needs them.
    than a fallback branch — it is what the agent actually does here.
 3. Then the two-pass rehearsal, with the harness re-logging on 401 (the 15-minute TTL
    killed one rehearsal) and `python3 -u` (buffering hid another).
+
+## Amendment — 2026-09-14: remaining item 1 is done — the gate is reachable, and the setup is said out loud
+
+Item 1 of "What remains" is addressed through the mechanism the script already had rather
+than a second one. `DEMO_INCUMBENT=weakest ./scripts/demo-reset.sh` picks the **servable
+version with the lowest recorded `roc_auc`** and sends traffic to it with the same
+`POST /api/models/rollback` call `DEMO_INCUMBENT=N` makes:
+
+- **servable** by the product's own rule (`artifact_problem`), so a version whose artifact
+  is gone can never be the incumbent a run argues against;
+- the score is each version's **own recorded training-run `roc_auc`** on the held-out split
+  `evaluate_version` reuses — a real registered version that is genuinely worse, chosen by
+  score rather than by a magic number;
+- a tie goes to the older version, so the pick is deterministic;
+- a reset whose pick is already serving **moves nothing** ("v18 is already serving
+  production — nothing to move"), so running it before every rehearsal costs nothing and
+  leaves no `rolled back from v18 to v18` audit event.
+
+Nothing about the loop, the tools or the gate changed, and **no console button was added**:
+this is demo *setup*, and the console's vocabulary (Train / Promote / Approve) should not
+gain a fourth thing to explain. `docs/demo-script.md` and the README now open with it as
+**step 0**, including the sentence the presenter has to say — *the win is deliberately set
+up*: the agent is not beating a strong model, it is finding a better candidate than a weak
+one, which is the comparison a promotion gate exists to make. The script prints the pinned
+version beside the strongest score, so the gap is on screen rather than in a footnote.
+
+**Verified live, twice, with the state reset in between (2026-09-14), not reasoned about.**
+Both arcs: v18 pinned (`roc_auc` 0.9471, and the agent re-measured its held-out accuracy at
+0.8860 itself); an investigation that read the registry, scored the incumbent, trained or
+reused candidates, and **proposed** — `agent-76f15347` (7 steps, 76.6 s of work, one
+`truncated` decision absorbed as an observation, proposal `promote-breast-cancer-classifier-41`
+awaiting the operator) and `agent-be3eaa98` (6 steps, 44.9 s, the same proposal); then the
+promotion was **declined** each time, and each run's ending records the real outcome
+("the operator declined v41") rather than the click. Every training call in both arcs hit
+the idempotency lookup and reused an existing version (v15, v6, v28, v9), so **both arcs
+added zero versions** and left no promotion parked and no workflow running.
+
+**A product bug this found, fixed here.** Repeated pinning is now the normal path, and it
+exposed `Model.rollback` demoting the version it had just marked live: rolling back to the
+version already serving left the production *pointer* on a row reading STAGING, so the
+console's version table showed **no production version at all** while the router served
+one. Found by running the reset twice, fixed in the aggregate, covered by a new domain test
+(`test_rollback_to_the_version_already_serving_keeps_it_live`), and the reset now skips the
+call when the pick is already serving.
+
+**Sighted, deliberately not changed:** on a rollback the read model demotes the *displaced*
+version to Staging while MLflow (which the route writes with `archive_existing_versions`)
+records it Archived. The read model is additive, so the mismatch persists until the api
+restarts. Pre-existing behaviour of the rollback path, not introduced here, and not needed
+for step 0 — recorded so it is not rediscovered live.
+
+**Still not done, so this ticket stays open.** The done-when names the demo, and the two
+arcs here exercised Act 1 twice, not Acts 2 and 3: the worker kill and the labelled
+fallback still need a presenter rehearsal. Remaining item 2 also still stands — pinning a
+weak incumbent makes the proposal likely, not guaranteed, so "no better candidate" is still
+a reachable ending and still has to be narratable as one.
