@@ -5357,9 +5357,10 @@
         <ul>
           <li>&bull; One step is one brain call, exactly one tool call, one observation</li>
           <li>&bull; The cap is 8 steps; an activity retry does not consume a step, a malformed decision does</li>
-          <li>&bull; The 6-minute ceiling sums per-step work, each step capped at 2 minutes, minus the human wait</li>
+          <li>&bull; The 6-minute ceiling sums per-step work, each capped at 2 minutes, minus the human wait - not elapsed wall-clock time</li>
           <li>&bull; The brain is stateless: the transcript is the whole state</li>
           <li>&bull; Four ways to end: concluded, budget_exhausted, no_progress, failed</li>
+          <li>&bull; The console reads a projection of the run&#39;s own event history: steps with per-step attempts, an interrupted flag, a pending phase and cost</li>
         </ul>
       </div>
 
@@ -5379,7 +5380,7 @@
       <div class="card">
         <div class="card-header">
           <div class="card-dot amber"></div>
-          <h3>The Six Tools</h3>
+          <h3>The Six Tools, Called By Name</h3>
         </div>
         <ul>
           <li>&bull; read_registry - versions and the stage that serves</li>
@@ -5388,6 +5389,7 @@
           <li>&bull; train_candidate - trains a candidate; a repeat is idempotent</li>
           <li>&bull; propose_promotion - files the durable promotion and waits</li>
           <li>&bull; conclude - ends the run with an answer</li>
+          <li>&bull; Each one is a Temporal activity; the workflow sandbox calls them by string name</li>
         </ul>
       </div>
 
@@ -5397,9 +5399,10 @@
           <h3>The Human Gate</h3>
         </div>
         <ul>
-          <li>&bull; propose_promotion files PromotionWorkflow through the promotion_outcome activity</li>
+          <li>&bull; propose_promotion files PromotionWorkflow through the promotion_outcome activity, then waits on wait_condition + a signal</li>
           <li>&bull; Approve promotes in the MLflow registry of record and routing moves traffic</li>
           <li>&bull; Decline completes with promoted: false; traffic does not move</li>
+          <li>&bull; The panel&#39;s promotion card shows candidate versus incumbent metrics</li>
           <li>&bull; Terminate the promotion while the agent waits and the run records a failure</li>
           <li>&bull; Promotion and rollback both check the artifact before traffic moves</li>
         </ul>
@@ -5416,6 +5419,7 @@
           <li>&bull; The console shows the frozen step with a running clock: frozen, not lost</li>
           <li>&bull; schedule_to_start_timeout is bounded at 10 minutes; unbounded, a task stranded on a dead worker hangs for ever</li>
           <li>&bull; That timeout counts as a failed attempt, so too tight a bound turns a short outage into a dead run</li>
+          <li>&bull; The event history is the only record; nothing is stored twice</li>
         </ul>
       </div>
     </div>

@@ -365,9 +365,10 @@
    "items": [
     "One step is one brain call, exactly one tool call, one observation",
     "The cap is 8 steps; an activity retry does not consume a step, a malformed decision does",
-    "The 6-minute ceiling sums per-step work, each step capped at 2 minutes, minus the human wait",
+    "The 6-minute ceiling sums per-step work, each capped at 2 minutes, minus the human wait - not elapsed wall-clock time",
     "The brain is stateless: the transcript is the whole state",
-    "Four ways to end: concluded, budget_exhausted, no_progress, failed"
+    "Four ways to end: concluded, budget_exhausted, no_progress, failed",
+    "The console reads a projection of the run's own event history: steps with per-step attempts, an interrupted flag, a pending phase and cost"
    ]
   },
   {
@@ -382,23 +383,25 @@
   },
   {
    "dot": "amber",
-   "title": "The Six Tools",
+   "title": "The Six Tools, Called By Name",
    "items": [
     "read_registry - versions and the stage that serves",
     "read_run_metrics - the run's own recorded metrics",
     "evaluate_version - scores a version against the incumbent",
     "train_candidate - trains a candidate; a repeat is idempotent",
     "propose_promotion - files the durable promotion and waits",
-    "conclude - ends the run with an answer"
+    "conclude - ends the run with an answer",
+    "Each one is a Temporal activity; the workflow sandbox calls them by string name"
    ]
   },
   {
    "dot": "rose",
    "title": "The Human Gate",
    "items": [
-    "propose_promotion files PromotionWorkflow through the promotion_outcome activity",
+    "propose_promotion files PromotionWorkflow through the promotion_outcome activity, then waits on wait_condition + a signal",
     "Approve promotes in the MLflow registry of record and routing moves traffic",
     "Decline completes with promoted: false; traffic does not move",
+    "The panel's promotion card shows candidate versus incumbent metrics",
     "Terminate the promotion while the agent waits and the run records a failure",
     "Promotion and rollback both check the artifact before traffic moves"
    ]
@@ -411,7 +414,8 @@
     "An interrupted activity is retried, so it runs again (at-least-once)",
     "The console shows the frozen step with a running clock: frozen, not lost",
     "schedule_to_start_timeout is bounded at 10 minutes; unbounded, a task stranded on a dead worker hangs for ever",
-    "That timeout counts as a failed attempt, so too tight a bound turns a short outage into a dead run"
+    "That timeout counts as a failed attempt, so too tight a bound turns a short outage into a dead run",
+    "The event history is the only record; nothing is stored twice"
    ]
   }
  ]
