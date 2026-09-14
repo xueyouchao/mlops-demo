@@ -14,9 +14,11 @@ not be parsed at all comes back as a typed failure (`truncated`, `no_tool_call`,
 `bad_arguments`, `unreachable`, `http_error`, `bad_response`) and never as an
 exception the workflow would have to catch.
 
-Stdlib only — no `requests`, no temporalio — so the parsing and the scripted
-policy can be exercised on the host without the worker image. The activity
-wrapper that needs temporalio lives in `activities.py`.
+Stdlib only, apart from an *optional* `sentry_sdk` used for the model-call span
+(the import is guarded, and the span degrades to a no-op without it) — no
+`requests`, no temporalio — so the parsing and the scripted policy can be
+exercised on the host without the worker image. The activity wrapper that needs
+temporalio lives in `activities.py`.
 
 Two producers share one output contract, by design:
 
@@ -31,12 +33,18 @@ model.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import time
 import urllib.error
 import urllib.request
+
+try:  # optional, exactly as in activities.py: the parser stays usable without it
+    import sentry_sdk
+except Exception:
+    sentry_sdk = None
 
 # The operator's choice (2026-09-13), overriding T08's latency-based pick: it is
 # the model DSH itself runs on. Re-measured on the step-6 scenario, 5 runs:
@@ -266,6 +274,111 @@ def parse_response(response: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
+# Telemetry: one span per *actual* model request
+# --------------------------------------------------------------------------
+# Why this is here: a model call that leaves no span is invisible to Sentry —
+# there is nothing to count and no `gen_ai.*` attributes to read, so the Explore
+# "LLM Calls" view stays empty. The worker had no tracing at all until `main.py`
+# set a sample rate, and this call had no span around it; both are needed.
+#
+# The shape is dictated by the SDK that is actually installed (sentry-sdk==2.19.2,
+# read in the worker image rather than assumed):
+#
+#   * `start_span(attributes={...})` does not exist yet — attributes are written
+#     one at a time with `span.set_data(key, value)`;
+#   * "Only spans contained in a transaction are sent to Sentry", and a Temporal
+#     worker has no incoming request to have started one, so the model call gets
+#     a one-span trace: a plain container (op `function`, and deliberately *not*
+#     a `gen_ai` span, because it is not a model request) with the model call
+#     beneath it. Without the container the span would never leave the process;
+#   * standalone `gen_ai` spans — and the `stream_gen_ai_spans` option — arrive
+#     in later SDKs (2.64+); on 2.19.2 this is the shape that is transmitted.
+#
+# Nothing in here may raise into the workflow, and nothing in here may change a
+# verdict: telemetry is worth having, never worth a failed investigation.
+PROVIDER_NAME = "ollama"
+
+
+class _Span:
+    """The handle the model producer writes attributes through.
+
+    Wraps a span that may be missing (no DSN, no tracing, an SDK that refused)
+    and swallows every error: an attribute that cannot be set is a lost
+    attribute, not a lost run.
+    """
+
+    def __init__(self, span=None):
+        self._span = span
+
+    def set_data(self, key, value):
+        if self._span is None:
+            return
+        try:
+            self._span.set_data(key, value)
+        except Exception:
+            pass
+
+
+@contextlib.contextmanager
+def model_span(model: str, provider: str = PROVIDER_NAME):
+    """The `gen_ai.chat` span for one model request.
+
+    Only `ask_model` uses this. The scripted policy is not a model call, so it
+    emits no LLM span at all — a policy dressed up as a model in Sentry would be
+    worse than an empty view.
+    """
+    container = span = None
+    if sentry_sdk is not None:
+        try:
+            container = sentry_sdk.start_transaction(
+                op="function", name="brain.ask_model"
+            )
+            span = container.start_child(op="gen_ai.chat", name=f"chat {model}")
+            # Set before the request, where the conventions want them: the
+            # attributes that classify the span are known up front, and
+            # head-based sampling reads them at the start.
+            span.set_data("gen_ai.operation.name", "chat")
+            span.set_data("gen_ai.provider.name", provider)
+            span.set_data("gen_ai.request.model", model)
+        except Exception:
+            container = span = None
+    try:
+        yield _Span(span)
+    finally:
+        # Child first: the transaction only sends the spans that are already
+        # finished when it is finished.
+        for s in (span, container):
+            try:
+                if s is not None:
+                    s.finish()
+            except Exception:
+                pass
+
+
+def _record_response(span: _Span, raw) -> None:
+    """The attributes only the response can supply, if it supplies them.
+
+    ollama reports the counts on the response itself (`prompt_eval_count` /
+    `eval_count`, the prompt and the generated tokens); a response that omits
+    them records nothing, rather than a zero that would read as a measurement.
+    """
+    if not isinstance(raw, dict):
+        return
+    served = raw.get("model")
+    if isinstance(served, str) and served:
+        span.set_data("gen_ai.response.model", served)
+    reason = raw.get("done_reason")
+    if isinstance(reason, str) and reason:
+        span.set_data("gen_ai.response.finish_reasons", json.dumps([reason]))
+    tokens_in = raw.get("prompt_eval_count")
+    if isinstance(tokens_in, int):
+        span.set_data("gen_ai.usage.input_tokens", tokens_in)
+    tokens_out = raw.get("eval_count")
+    if isinstance(tokens_out, int):
+        span.set_data("gen_ai.usage.output_tokens", tokens_out)
+
+
+# --------------------------------------------------------------------------
 # The model producer
 # --------------------------------------------------------------------------
 def _post_json(url: str, payload: dict, timeout_s: float, attempts: int = 2) -> dict:
@@ -299,7 +412,12 @@ def _post_json(url: str, payload: dict, timeout_s: float, attempts: int = 2) -> 
 
 
 def ask_model(goal: str, entries: list, config: dict) -> dict:
-    """One call to ollama with the six tool schemas. Returns a decision dict."""
+    """One call to ollama with the six tool schemas. Returns a decision dict.
+
+    This is the only place a model is actually called, so it is the only place
+    that opens a `gen_ai` span: a failed call still leaves its span behind,
+    because the context manager finishes it on the way out either way.
+    """
     payload = {
         "model": config["model"],
         "messages": build_messages(goal, entries),
@@ -307,7 +425,9 @@ def ask_model(goal: str, entries: list, config: dict) -> dict:
         "stream": False,
         "options": {"num_predict": config["num_predict"]},
     }
-    raw = _post_json(f"{config['base_url']}/api/chat", payload, config["timeout_s"])
+    with model_span(config["model"]) as span:
+        raw = _post_json(f"{config['base_url']}/api/chat", payload, config["timeout_s"])
+        _record_response(span, raw)
     decision = parse_response(raw)
     decision["producer"] = "model"
     decision["model"] = config["model"]

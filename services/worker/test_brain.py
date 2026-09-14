@@ -161,6 +161,120 @@ d = brain.decide("goal", [])
 check("off refuses to fall back", d["ok"] is False and d["kind"] == "unreachable", str(d))
 
 # --------------------------------------------------------------------------
+print("\nthe model call's Sentry span")
+# Sentry is stood in for here: what matters is what brain.py *asks* it for, and
+# that is checkable without a DSN, a network, or the real SDK's version quirks.
+# The reply is a real ollama-shaped response, so the token counts are the ones
+# the model would actually report.
+
+
+class FakeSpan:
+    def __init__(self, op=None, name=None):
+        self.op, self.name = op, name
+        self.data, self.children = {}, []
+        self.finished = False
+
+    def set_data(self, key, value):
+        self.data[key] = value
+
+    def finish(self):
+        self.finished = True
+
+    def start_child(self, op=None, name=None):
+        child = FakeSpan(op, name)
+        self.children.append(child)
+        return child
+
+
+class FakeSentry:
+    def __init__(self):
+        self.transactions = []
+
+    def start_transaction(self, op=None, name=None):
+        t = FakeSpan(op, name)
+        self.transactions.append(t)
+        return t
+
+
+class RudeSpan:
+    """A Sentry that fails at everything, to prove telemetry cannot break a run."""
+
+    def set_data(self, key, value):
+        raise RuntimeError("telemetry is broken")
+
+    def finish(self):
+        raise RuntimeError("telemetry is broken")
+
+    def start_child(self, **kwargs):
+        return RudeSpan()
+
+
+class RudeSentry:
+    def start_transaction(self, **kwargs):
+        raise RuntimeError("telemetry is broken")
+
+
+class RudeChildSentry:
+    def start_transaction(self, **kwargs):
+        return RudeSpan()
+
+
+OLLAMA_REPLY = {
+    "model": "deepseek-v4.1-flash:cloud", "done_reason": "stop",
+    "prompt_eval_count": 812, "eval_count": 64,
+    "message": {"tool_calls": [
+        {"function": {"name": "read_registry", "arguments": {"why": "start from the registry"}}}]},
+}
+DECIDE_CONFIG = {"model": "deepseek-v4.1-flash:cloud", "base_url": "http://ollama",
+                 "num_predict": 4096, "fallback": "auto", "timeout_s": 60}
+
+real_post_json = brain._post_json
+real_sentry = brain.sentry_sdk
+brain._post_json = lambda url, payload, timeout_s, attempts=2: OLLAMA_REPLY
+brain.reset_model_breaker()   # the unreachable checks above tripped it
+
+fake = FakeSentry()
+brain.sentry_sdk = fake
+d = brain.decide("goal", [], DECIDE_CONFIG)
+spans = [s for t in fake.transactions for s in t.children]
+
+check("a model call opens exactly one gen_ai span", len(spans) == 1 and spans[0].op == "gen_ai.chat",
+      str([(t.op, [s.op for s in t.children]) for t in fake.transactions]))
+check("the span is named for the operation and the model",
+      spans and spans[0].name == f"chat {DECIDE_CONFIG['model']}", str(spans and spans[0].name))
+check("it names the operation, the provider and the requested model",
+      spans and (spans[0].data.get("gen_ai.operation.name"),
+                 spans[0].data.get("gen_ai.provider.name"),
+                 spans[0].data.get("gen_ai.request.model")) == ("chat", "ollama", DECIDE_CONFIG["model"]),
+      str(spans and spans[0].data))
+check("token usage is recorded when the response reports it",
+      spans and (spans[0].data.get("gen_ai.usage.input_tokens"),
+                 spans[0].data.get("gen_ai.usage.output_tokens")) == (812, 64),
+      str(spans and spans[0].data))
+check("the container span claims no gen_ai operation of its own",
+      all(t.op == "function" for t in fake.transactions), str([t.op for t in fake.transactions]))
+check("both spans are finished (an unfinished span is dropped)",
+      spans and spans[0].finished and all(t.finished for t in fake.transactions))
+
+fakeless = FakeSentry()
+brain.sentry_sdk = fakeless
+brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="on"))
+check("the scripted fallback emits no LLM span at all (it is not a model call)",
+      fakeless.transactions == [], str([t.op for t in fakeless.transactions]))
+
+brain.sentry_sdk = RudeSentry()
+d2 = brain.decide("goal", [], DECIDE_CONFIG)
+check("a Sentry that raises cannot fail the run", d2.get("ok") and d2.get("producer") == "model", str(d2))
+
+brain.sentry_sdk = RudeChildSentry()
+d3 = brain.decide("goal", [], DECIDE_CONFIG)
+check("nor can a span that refuses every attribute",
+      d3.get("ok") and d3.get("producer") == "model", str(d3))
+
+brain._post_json = real_post_json
+brain.sentry_sdk = real_sentry
+
+# --------------------------------------------------------------------------
 print("\nthe real model (host ollama)")
 os.environ["AGENT_FALLBACK"] = "auto"
 # NB: brain.DEFAULT_BASE_URL is the *container's* view of the host. Run this
