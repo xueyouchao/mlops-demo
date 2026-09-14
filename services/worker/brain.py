@@ -327,6 +327,13 @@ def parse_response(response: dict) -> dict:
 # Nothing in here may raise into the workflow, and nothing in here may change a
 # verdict: telemetry is worth having, never worth a failed investigation. Every
 # SDK call below is wrapped, and the handles degrade to no-ops.
+#
+# Prompts and answers are captured only when the operator has opted in
+# (`send_default_pii`, which the SDK's provider integrations gate their own
+# `gen_ai.input.messages` capture on). The conversation grouping key does not
+# depend on that switch; the Conversations *view* timeline does. So the switch is
+# read from the client, never invented here, and this file must still be a
+# no-op with the SDK absent entirely.
 PROVIDER_NAME = "ollama"
 
 # The name every agent invocation of this loop is grouped under in the AI views.
@@ -373,19 +380,22 @@ class _Span:
         except Exception:
             pass
 
-    def set_data_normalized(self, key, value):
+    def set_data_normalized(self, key, value, unpack: bool = True):
         """A structured value, in the form Sentry's own integrations send it.
 
         `gen_ai.response.finish_reasons` is a list upstream and a string on the
         wire; the SDK's normaliser is what turns one into the other (and it is
         what every provider integration uses), so use it rather than inventing a
         second convention. Without it, `json.dumps` is the same string by hand.
+        `unpack` mirrors the SDK's own argument: True collapses a one-element
+        list (right for `finish_reasons`), False keeps the list a list (required
+        for `gen_ai.input.messages`, which must stay an array).
         """
         if self._span is None:
             return
         try:
             if sdk_ai is not None:
-                sdk_ai.set_data_normalized(self._span, key, value)
+                sdk_ai.set_data_normalized(self._span, key, value, unpack=unpack)
                 return
         except Exception:
             pass
@@ -538,6 +548,90 @@ def _label_scripted(agent: _Span, reason: str) -> None:
     agent.set_data("agent.fallback_reason", reason)
 
 
+def _capture_content() -> bool:
+    """Whether the operator has asked for prompt and response content in Sentry.
+
+    Asked of the SDK's own client rather than of the environment, because
+    `send_default_pii` is exactly the option the SDK's provider integrations gate
+    their own `gen_ai.input.messages` capture on: this way one switch governs all
+    of it, and what an operator has configured for their other integrations is
+    what governs the agent too. Off unless it is explicitly on — and nothing about
+    the conversation grouping depends on it.
+    """
+    try:
+        return bool(sentry_sdk.get_client().should_send_default_pii())
+    except Exception:
+        return False
+
+
+def _record_request(span: _Span, payload: dict) -> None:
+    """What was asked of the model, if content capture is on.
+
+    The shapes are the ones the SDK's own constants document: the system prompt
+    goes in `gen_ai.system_instructions` as parts carrying `text`, and the
+    conversation goes in `gen_ai.input.messages` as messages whose parts carry
+    `content`, with roles normalised to the four the views accept. Both are
+    stringified arrays on the wire, which is what `unpack=False` preserves.
+
+    Recorded *before* the request is sent, so a call that never returns still
+    shows what it was asked.
+    """
+    if not _capture_content():
+        return
+    try:
+        messages = payload.get("messages") or []
+        system = [m for m in messages if m.get("role") == "system"]
+        user = [m for m in messages if m.get("role") != "system"]
+        if system:
+            span.set_data_normalized(
+                "gen_ai.system_instructions",
+                [{"type": "text", "text": str(m.get("content") or "")} for m in system],
+                unpack=False,
+            )
+        if user:
+            span.set_data_normalized(
+                "gen_ai.input.messages",
+                [
+                    {
+                        "role": "user",
+                        "parts": [{"type": "text", "content": str(m.get("content") or "")}],
+                    }
+                    for m in user
+                ],
+                unpack=False,
+            )
+    except Exception:
+        pass
+
+
+def _output_parts(raw: dict) -> list:
+    """The assistant's answer as message parts, in the documented shapes."""
+    parts = []
+    message = raw.get("message")
+    if not isinstance(message, dict):
+        return parts
+    thinking = message.get("thinking")
+    if isinstance(thinking, str) and thinking:
+        parts.append({"type": "reasoning", "content": thinking})
+    content = message.get("content")
+    if isinstance(content, str) and content:
+        parts.append({"type": "text", "content": content})
+    for call in message.get("tool_calls") or []:
+        function = (call or {}).get("function") or {}
+        arguments = function.get("arguments")
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except Exception:
+                pass
+        part = {"type": "tool_call", "name": str(function.get("name") or "")}
+        if call.get("id"):
+            part["id"] = call["id"]
+        part["arguments"] = arguments if arguments is not None else {}
+        parts.append(part)
+    return parts
+
+
 def _record_response(span: _Span, raw) -> None:
     """The attributes only the response can supply, if it supplies them.
 
@@ -563,6 +657,16 @@ def _record_response(span: _Span, raw) -> None:
         span.set_data("gen_ai.usage.output_tokens", tokens_out)
     if isinstance(tokens_in, int) and isinstance(tokens_out, int):
         span.set_data("gen_ai.usage.total_tokens", tokens_in + tokens_out)
+    if _capture_content():
+        try:
+            parts = _output_parts(raw)
+            if parts:
+                answer = {"role": "assistant", "parts": parts}
+                if isinstance(reason, str) and reason:
+                    answer["finish_reason"] = reason
+                span.set_data_normalized("gen_ai.output.messages", [answer], unpack=False)
+        except Exception:
+            pass
 
 
 # --------------------------------------------------------------------------
@@ -618,6 +722,7 @@ def ask_model(goal: str, entries: list, config: dict, agent: _Span | None = None
     handle.set_data("gen_ai.provider.name", PROVIDER_NAME)
     handle.set_data("gen_ai.request.model", config["model"])
     span = model_span(handle, config["model"])
+    _record_request(span, payload)
     try:
         raw = _post_json(f"{config['base_url']}/api/chat", payload, config["timeout_s"])
         _record_response(span, raw)

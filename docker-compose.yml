@@ -136,10 +136,14 @@ services:
       # a sample rate the worker's spans are built and then dropped. A demo makes
       # few enough calls that keeping all of them is the honest default.
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-1.0}
-      # Prompt/output capture, off by default: a privacy decision, not a technical
-      # one. Explore > Conversations is the only view that needs it — the
-      # conversation itself is grouped by gen_ai.conversation.id either way.
-      SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-0}
+      # Prompt/output capture. The *code* default (`services/worker/main.py`) is
+      # off, so a deployment that configures nothing captures no content; this
+      # demo's worker turns it on, because the Conversations view has no timeline
+      # without it. What it captures here is the operator's goal and the
+      # registry/metric digests the agent read — no end-user content exists in
+      # this demo. Turn it off with `SENTRY_SEND_DEFAULT_PII=0 docker compose up
+      # -d worker`; grouping by gen_ai.conversation.id works either way.
+      SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-1}
     depends_on:
       postgres:
         condition: service_healthy

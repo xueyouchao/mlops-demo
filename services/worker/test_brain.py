@@ -219,17 +219,34 @@ class FakeAi:
             raise RuntimeError("set_conversation_id outside a scope")
         self.sentry.scopes[-1].conversation_id = conversation_id
 
-    def set_data_normalized(self, span, key, value):
-        span.set_data(key, value[0] if isinstance(value, list) and len(value) == 1
+    def set_data_normalized(self, span, key, value, unpack=True):
+        # `unpack` is the SDK's own argument, mirrored: True collapses a
+        # one-element list (right for finish_reasons), False keeps it a list
+        # (required for the message arrays).
+        span.set_data(key, value[0] if unpack and isinstance(value, list) and len(value) == 1
                       else json.dumps(value))
 
 
+class FakeClient:
+    """Just the one option brain.py asks the client about."""
+
+    def __init__(self, pii):
+        self._pii = pii
+
+    def should_send_default_pii(self):
+        return self._pii
+
+
 class FakeSentry:
-    def __init__(self):
+    def __init__(self, pii=False):
         self.transactions = []
         self.scopes = []          # the open scope stack
         self.scopes_created = []  # every fork, kept so it can be inspected after exit
         self.ai = FakeAi(self)
+        self.client = FakeClient(pii)
+
+    def get_client(self):
+        return self.client
 
     def start_transaction(self, op=None, name=None):
         t = FakeSpan(op, name)
@@ -369,6 +386,77 @@ check("and a second run does not inherit the first one's conversation id",
       == ["agent-first", "agent-second"],
       str([t.children[0].data.get("gen_ai.conversation.id") for t in leak.transactions]))
 
+# Prompt and output capture is off unless the operator turned it on: the code
+# default must capture nothing, and the switch is the SDK's own.
+check("with content capture off, no prompt or answer is recorded at all",
+      not any(k in model_spans[0].data for k in ("gen_ai.input.messages",
+                                                 "gen_ai.output.messages",
+                                                 "gen_ai.system_instructions")),
+      str(sorted(model_spans[0].data)))
+
+pii = FakeSentry(pii=True)
+brain.sentry_sdk = pii
+brain.sdk_ai = pii.ai
+d_pii = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
+pii_model = [c for t in pii.transactions for a in t.children for c in a.children]
+pii_agent = [c for t in pii.transactions for c in t.children]
+carried = pii_model[0].data if pii_model else {}
+
+# Every content attribute is a *stringified array*, which is what the views
+# parse, so the checks parse it back rather than trusting the string.
+def _parsed(key):
+    try:
+        return json.loads(carried.get(key) or "null")
+    except Exception:
+        return None
+
+
+check("with content capture on, the system prompt goes in system_instructions",
+      _parsed("gen_ai.system_instructions") == [{"type": "text", "text": brain.SYSTEM_PROMPT}],
+      str(carried.get("gen_ai.system_instructions"))[:120])
+check("the operator's goal and the transcript are the input message",
+      (lambda m: bool(m) and m[0]["role"] == "user"
+       and m[0]["parts"][0]["type"] == "text"
+       and "Operator goal: goal" in m[0]["parts"][0]["content"]
+       and "Choose the next step." in m[0]["parts"][0]["content"])(
+          _parsed("gen_ai.input.messages")),
+      str(carried.get("gen_ai.input.messages"))[:120])
+check("the model's answer is the output message, tool call and finish reason included",
+      _parsed("gen_ai.output.messages") == [{
+          "role": "assistant",
+          "parts": [{"type": "tool_call", "name": "read_registry",
+                     "arguments": {"why": "start from the registry"}}],
+          "finish_reason": "stop",
+      }],
+      str(carried.get("gen_ai.output.messages"))[:160])
+check("and the conversation id is still there beside the content",
+      carried.get("gen_ai.conversation.id") == RUN_ID
+      and pii_agent and pii_agent[0].data.get("gen_ai.conversation.id") == RUN_ID,
+      str((carried.get("gen_ai.conversation.id"),
+           pii_agent and pii_agent[0].data.get("gen_ai.conversation.id"))))
+check("the decision is unchanged by capturing it",
+      d_pii.get("ok") and d_pii.get("tool") == "read_registry", str(d_pii))
+
+# A client that cannot even be asked must read as "off", never as a crash.
+class MuteClient:
+    def get_client(self):
+        raise RuntimeError("telemetry is broken")
+
+
+mute = FakeSentry(pii=True)
+mute.get_client = MuteClient().get_client
+brain.sentry_sdk = mute
+brain.sdk_ai = mute.ai
+d_mute = brain.decide("goal", [], DECIDE_CONFIG, run_id=RUN_ID)
+mute_model = [c for t in mute.transactions for a in t.children for c in a.children]
+check("a client that refuses to be asked captures nothing and breaks nothing",
+      d_mute.get("ok") and mute_model
+      and "gen_ai.input.messages" not in mute_model[0].data,
+      str((d_mute.get("tool"), sorted(mute_model[0].data) if mute_model else None)))
+
+brain.sentry_sdk = fake
+brain.sdk_ai = fake.ai
+
 fakeless = FakeSentry()
 brain.sentry_sdk = fakeless
 brain.sdk_ai = fakeless.ai
@@ -386,6 +474,21 @@ check("with the producer and the reason as attributes to filter on",
                     labelled[0].data.get("agent.fallback_reason"))
       == ("scripted-policy", "AGENT_FALLBACK=on"),
       str(labelled and labelled[0].data))
+pii_scripted = FakeSentry(pii=True)
+brain.sentry_sdk = pii_scripted
+brain.sdk_ai = pii_scripted.ai
+brain.decide("goal", [], dict(DECIDE_CONFIG, fallback="on"), run_id=RUN_ID)
+scripted_spans = [c for t in pii_scripted.transactions for c in t.children]
+check("even with content capture on, the scripted policy records no prompt or answer",
+      scripted_spans and not any(
+          k in ("gen_ai.input.messages", "gen_ai.output.messages",
+                "gen_ai.system_instructions")
+          for s_ in scripted_spans for k in s_.data)
+      and not any(c.children for c in scripted_spans),
+      str([sorted(s_.data) for s_ in scripted_spans]))
+brain.sentry_sdk = fake
+brain.sdk_ai = fake.ai
+
 check("and it never claims a model was asked anything",
       labelled and not any(k.startswith("gen_ai.request.") or k == "gen_ai.provider.name"
                            for k in labelled[0].data),

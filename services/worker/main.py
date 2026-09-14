@@ -39,14 +39,16 @@ SENTRY_DSN = os.getenv("SENTRY_DSN", "")
 SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "1.0"))
 
 # Prompt and output capture is a *privacy* decision, not a technical one, so it
-# is off by default and the operator turns it on. Python's SDK gates
-# `gen_ai.input.messages` / `gen_ai.output.messages` behind `send_default_pii`,
-# and Explore > Conversations reconstructs the chat from exactly those
-# attributes — so without this the conversation is still grouped (the run's
-# `gen_ai.conversation.id` is set either way) but its timeline renders empty.
-# What would be captured here is the operator's goal and the registry/metric
-# digests the agent read, not end-user content. `SENTRY_SEND_DEFAULT_PII=1`
-# enables it for a deployment whose privacy policy allows it.
+# is off by default and the operator turns it on — deliberately at the call site
+# rather than in this file, so a deployment that configures nothing captures
+# nothing. Python's SDK gates `gen_ai.input.messages` / `gen_ai.output.messages`
+# behind `send_default_pii`, and Explore > Conversations reconstructs the chat
+# from exactly those attributes — so without this the conversation is still
+# grouped (the run's `gen_ai.conversation.id` is set either way) but its timeline
+# renders empty. What would be captured here is the operator's goal and the
+# registry/metric digests the agent read, not end-user content.
+# `docker-compose.yml` sets it to 1 for this demo's worker — a choice made
+# explicitly by the operator, after being told what it captures, not a default.
 SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "0").strip().lower() in (
     "1", "true", "yes", "on",
 )

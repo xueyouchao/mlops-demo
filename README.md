@@ -187,9 +187,33 @@ transaction  op=function, "agent step agent-1f4c9a2b"   ← container; a Tempora
 To see it: **Explore → Traces**, query `op:gen_ai.invoke_agent` (or
 `gen_ai.conversation.id:agent-<hex>` for one run), environment `development`.
 **Explore → Conversations** groups the same spans by conversation, but it
-reconstructs the chat from prompt/output attributes, so it renders empty unless
-`SENTRY_SEND_DEFAULT_PII=1` is set — that capture is a privacy decision, so it is
-off by default.
+reconstructs the chat from the `gen_ai.input.messages` / `gen_ai.output.messages`
+attributes, so it renders empty without content capture — off in the code, on for
+this demo's worker (below).
+
+### Content capture (prompts and answers)
+
+The **code** default is off: `services/worker/main.py` reads
+`SENTRY_SEND_DEFAULT_PII=0` unless told otherwise, so a deployment that configures
+nothing captures no content. **This demo's worker turns it on** in
+`docker-compose.yml` (`SENTRY_SEND_DEFAULT_PII: ${SENTRY_SEND_DEFAULT_PII:-1}`)
+because the Conversations timeline is empty without it.
+
+What is captured here: the operator's goal, the transcript digests the agent read
+(registry stages and metrics, evaluation results), and the model's answer —
+recorded as `gen_ai.system_instructions`, `gen_ai.input.messages` and
+`gen_ai.output.messages` on the `gen_ai.chat` span. This demo has no end-user
+content to leak; a deployment that handles real user data should decide
+deliberately rather than inherit this. Environment: `development`.
+
+Turn it off for the worker with one line:
+
+```bash
+SENTRY_SEND_DEFAULT_PII=0 docker compose up -d worker
+```
+
+Grouping is unaffected either way: conversations are keyed by
+`gen_ai.conversation.id`, which every span carries regardless of this setting.
 
 ## Environment variables
 
@@ -197,7 +221,7 @@ off by default.
 |---|---|---|
 | `SENTRY_DSN` | *(empty)* | Set a real DSN to enable Sentry capture |
 | `SENTRY_TRACES_SAMPLE_RATE` | `1.0` | Worker only: sample rate for the agent's agent+LLM spans (the api keeps its own `0.25`) |
-| `SENTRY_SEND_DEFAULT_PII` | `0` | Worker only: capture prompts/outputs. Required for the Conversations view to render; off by default because it is a privacy choice |
+| `SENTRY_SEND_DEFAULT_PII` | `0` in code, `1` for this demo's worker | Capture prompts/outputs (`gen_ai.input.messages` etc). Needed for the Conversations view; the code default stays off so a silent deployment captures nothing |
 | `JWT_SECRET` | `change-me-in-prod` | **Set this.** Signs the auth JWT |
 | `SEED_OPERATOR_PASSWORD` / `SEED_ADMIN_PASSWORD` | dev presets | Seed logins |
 
