@@ -24,6 +24,7 @@ const TABS = {
   ops:                 { kind: "inline", title: "Ops Console", short: "Ops" },
   agent:               { kind: "inline", title: "Investigation Agent", short: "Agent" },
   "diagram-architecture": { kind: "frame",  title: "Architecture", short: "Arch", src: "/diagrams/architecture.html", group: "Diagrams" },
+  "diagram-agent":       { kind: "frame",  title: "Agent Loop",    short: "Loop", src: "/diagrams/agent.html",        group: "Diagrams" },
   "diagram-workflow":    { kind: "frame",  title: "Workflow",      short: "WF",   src: "/diagrams/workflow.html",    group: "Diagrams" },
   "diagram-lifecycle":   { kind: "frame",  title: "Lifecycle",     short: "LC",   src: "/diagrams/lifecycle.html",   group: "Diagrams" },
   "diagram-sequence":    { kind: "frame",  title: "Sequence",      short: "Seq",  src: "/diagrams/sequence.html",    group: "Diagrams" },
@@ -36,7 +37,7 @@ const TABS = {
 
 const SECTIONS = [
   { label: "Lifecycle", ids: ["ops", "agent"] },
-  { label: "Diagrams", ids: ["diagram-architecture", "diagram-workflow", "diagram-lifecycle", "diagram-sequence", "diagram-dataflow"] },
+  { label: "Diagrams", ids: ["diagram-architecture", "diagram-agent", "diagram-workflow", "diagram-lifecycle", "diagram-sequence", "diagram-dataflow"] },
   { label: "Apps & docs", ids: ["temporal", "mlflow", "docs", "sentry"] },
 ];
 
