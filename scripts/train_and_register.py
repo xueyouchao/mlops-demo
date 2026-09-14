@@ -42,6 +42,12 @@ def main() -> None:
         mlflow.log_param("n_estimators", 120)
         mlflow.log_param("max_depth", 3)
         mlflow.log_param("learning_rate", 0.08)
+        # This script trains one family and offers no selector — the console panel and
+        # the agent's `train_candidate` tool are where a family is chosen. It still
+        # *names* the family it trained, because the console's version table reads it
+        # back from the run: a version that says nothing shows as a dash, and "which
+        # estimator made this?" is a question the registry should answer on its own.
+        mlflow.log_param("model_kind", "gradient_boosting")
         mlflow.log_param("dataset", "breast_cancer_wisconsin")
         mlflow.log_param("data_hash", _data_hash(X, y))
         mlflow.log_metric("accuracy", acc)
