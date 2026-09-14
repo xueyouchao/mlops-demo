@@ -1,7 +1,7 @@
 """Temporal worker entrypoint.
 
 Runs the workflows/activities and registers against the Temporal server so the
-api service's promote/rollback calls are durably executed.
+api service's promote and train calls are durably executed.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from activities import brain_decide, promote_stage, rollback_stage, train_and_register
+from activities import brain_decide, promote_stage, train_and_register
 from tools import (
     conclude,
     evaluate_version,
@@ -22,7 +22,7 @@ from tools import (
     read_run_metrics,
     train_candidate,
 )
-from workflows import InvestigationWorkflow, PromotionWorkflow, RollbackWorkflow, TrainingWorkflow
+from workflows import InvestigationWorkflow, PromotionWorkflow, TrainingWorkflow
 
 TEMPORAL_HOST = os.getenv("TEMPORAL_HOST", "temporal")
 TEMPORAL_PORT = int(os.getenv("TEMPORAL_PORT", "7233"))
@@ -39,9 +39,9 @@ async def main() -> None:
     worker = Worker(
         client,
         task_queue="ml-lifecycle",
-        workflows=[PromotionWorkflow, RollbackWorkflow, TrainingWorkflow, InvestigationWorkflow],
+        workflows=[PromotionWorkflow, TrainingWorkflow, InvestigationWorkflow],
         activities=[
-            promote_stage, rollback_stage, train_and_register, brain_decide,
+            promote_stage, train_and_register, brain_decide,
             # the agent's six tools — every tool is an activity (T01)
             read_registry, read_run_metrics, evaluate_version,
             train_candidate, propose_promotion, conclude,

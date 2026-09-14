@@ -114,7 +114,11 @@ function ApprovalCard({ run, onDecide, onAbandon, confirming, setConfirming, bus
           <tr>
             <th>held-out split</th>
             <th>candidate v{p.version}</th>
-            <th>serving v{run.serving_version || "?"}</th>
+            {/* The incumbent's id is not in the run projection — the proposal
+                carries its metrics, not its version number — so the column names
+                what the column actually holds rather than heading every run with a
+                version that was never read. */}
+            <th>incumbent (serving)</th>
           </tr>
         </thead>
         <tbody>
