@@ -98,6 +98,26 @@ from operator retrains, seeded baselines and verification probes, plus one early
 
 ---
 
+## Screenshots
+
+Screenshots of the running demo, in capture order — the same ground the
+[write-up](https://www.linkedin.com/pulse/mlops-demo-end-to-end-ml-lifecycle-platform-youchao-xue-7lgzc/)
+covers.
+
+![mlops-demo — End-to-End ML Agentic Lifecycle Platform](docs/screenshots/linkedin-cover.png)
+
+![Screenshot 1](docs/screenshots/01.png)
+
+![Screenshot 2](docs/screenshots/02.png)
+
+![Screenshot 3](docs/screenshots/03.png)
+
+![Screenshot 4](docs/screenshots/04.png)
+
+![Screenshot 5](docs/screenshots/05.png)
+
+---
+
 ## Quick start
 
 ```bash
