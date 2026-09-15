@@ -7,6 +7,16 @@ train → register (MLflow) → promote (Temporal, human-approval gate)
      → serve (canary / blue-green) → rollback → monitor (drift) → Sentry
 ```
 
+It began as a console for a **person to drive every step of that lifecycle**: press Train to
+register a candidate, press Promote to reach production, press the override to move traffic.
+Those routes are still here and still work with no agent involved. The same lifecycle now has
+a second driver — an **investigation agent** that takes a goal in plain text and works the
+real platform through six tools instead of buttons: the same trainer, the same registry, the
+same gate. What it does, and what it deliberately does not do, is in
+[What the agent does](#what-the-agent-does).
+
+The gate did not move for it. The agent proposes a promotion; only a person approves one.
+
 **Dataset:** Breast Cancer Wisconsin (`sklearn.load_breast_cancer`, classification, 569×30) — canonical medical-ML data, zero domain knowledge needed, loads in one line.
 
 ---
@@ -41,6 +51,50 @@ frame/cookie policies just work:
 
 Diagram HTMLs are bind-mounted from `./diagrams` into the container, so re-running
 `archify deliver` doesn't require rebuilding the image.
+
+---
+
+## What the agent does
+
+The **Investigation Agent** tab is where it lives: give it a goal in plain text, watch it
+work, read the transcript it leaves behind. One run is a **bounded ReAct loop** — at most
+**8 steps**, **one tool call per step**, **one observation recorded per step**. The brain is
+stateless: it is handed the goal and the transcript and returns one decision, so the
+transcript is the agent's whole memory. That transcript is the run's own Temporal event
+history, which is why a killed worker resumes the run where it was and the interrupted
+activity runs again — at-least-once, not exactly-once.
+
+**Six tools, and no others, are offered to the brain:** `read_registry`, `read_run_metrics`,
+`evaluate_version`, `train_candidate`, `propose_promotion`, `conclude`. Each is an activity,
+so the loop itself never touches MLflow, serving or Temporal. A *verdict* — an unknown version,
+an artifact that cannot serve, a promotion already pending — comes back as an observation the
+agent can correct; an *infrastructure* failure raises instead, and when a tool's attempts run
+out the **run fails**. There is no path where a tool gives up and the agent tries something
+else.
+
+**It chooses the estimator, not only its parameters.** `train_candidate` takes a `model_kind`
+and that kind's parameters, so the agent picks between boosted trees and a linear model on
+standardized features — a different inductive bias rather than a re-tune of one (*Two
+estimator families, one trainer*, below). A run may train **2 candidates at most**, and a
+training is keyed on the dataset, the kind and the parameters: a spec that already exists
+returns the version it registered instead of registering a twin, and a reuse does not spend
+the second slot. Both properties are there because the worker can die mid-run.
+
+**It proposes; it never promotes.** No tool approves a promotion, and no tool rolls back
+production. `propose_promotion` files the request that starts the same gate the console's
+Promote button starts, and the run stays alive — on its own clock — while the operator
+decides. Only the human decision reaches production.
+
+**It can lose honestly.** It proposes only when a candidate genuinely beats the version
+serving production, and otherwise concludes that nothing did — a supported ending rather than
+a failure (*Run the demo* below is about making the win reachable on demand, and saying out
+loud that it was set up).
+
+**The record is checkable.** The loop asks for training with `requested_by: agent:<workflow-id>`,
+logged as a param on the MLflow run. At the time of writing **42 of the 54 registered versions**
+carry that marker, from **31 distinct runs** — a count that moves as the demo runs. The rest came
+from operator retrains, seeded baselines and verification probes, plus one early version marked
+`agent` with no workflow id.
 
 ---
 
@@ -143,14 +197,15 @@ Bounded contexts communicate **only** through domain events — which double as 
   two roles (operator/admin). Promotion approval is role-gated and identity-carrying.
 - **Promotion gate:** real **human approval** on staging→production — a durable
   **Temporal** workflow that waits on the approve signal; pipeline steps are auto.
-- **Serving:** weight-based **canary + blue-green** router (A/B measurement is out of scope).
+- **Serving:** weight-based **canary + blue-green** router (A/B measurement is out of scope);
+  traffic moves 100% at a time — nothing in the workflow or the console sets a partial split.
 - **Sentry:** `sentry-sdk` wired across services, driven by `SENTRY_DSN` env
   (no-ops when empty; no self-hosted Sentry). The worker's agent loop also emits
   **agent traces**: see [What an investigation looks like in Sentry](#what-an-investigation-looks-like-in-sentry).
-- **Investigation agent:** a durable ReAct loop on Temporal (8 steps, one tool call
-  each, brain as an activity) that can investigate the registry, train a candidate and
-  propose a promotion — then waits at the same human gate. Its transcript is its own
-  event history. See the **Agent** tab in the console, and
+- **Investigation agent:** a durable ReAct loop on Temporal that can investigate the
+  registry, train a candidate and propose a promotion — then waits at the same human
+  gate. Its transcript is its own event history; the loop's contract is in
+  [What the agent does](#what-the-agent-does). See the **Agent** tab in the console, and
   [`docs/demo-script.md`](docs/demo-script.md) for the demo that kills the worker on
   purpose.
 
@@ -226,6 +281,10 @@ transaction  op=function, "agent step agent-1f4c9a2b"   ← container; a Tempora
   workflow sandbox forbids importing `sentry_sdk`, so no span may be opened for a
   whole run from `workflows.py`. The longest-lived span an activity can honestly own
   is one step, and the conversation is what ties the steps together.
+* **Tool calls are not spans.** The six tools run in activities that open none, so one step
+  appears in Sentry as its `gen_ai.invoke_agent` span, plus the `gen_ai.chat` span beneath it
+  when a model was called — and nothing more: which tool the agent chose is in the console's
+  transcript, not in the trace. Coverage here is of the agent's decisions, not of its actions.
 
 To see it: **Explore → Traces**, query `op:gen_ai.invoke_agent` (or
 `gen_ai.conversation.id:agent-<hex>` for one run), environment `development`.
